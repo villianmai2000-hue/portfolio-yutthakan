@@ -55,6 +55,9 @@ export const api = {
   getMessages: () => request('/contact'),
   updateMessageStatus: (id, status) => request(`/contact/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
 
+  // File & Image Storage in MongoDB Atlas
+  uploadFile: (data) => request('/upload', { method: 'POST', body: JSON.stringify(data) }),
+
   // System & Backup
   getStatus: () => request('/status'),
   getBackupUrl: () => `${BASE_URL}/backup`

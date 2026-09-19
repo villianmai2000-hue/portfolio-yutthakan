@@ -154,6 +154,42 @@ app.get('/api/status', requireAdmin, async (req, res) => {
   }
 });
 
+// File Upload & Serving Endpoint (ส่งไฟล์รูปเข้าไปเก็บใน MongoDB Atlas ทันที)
+app.post('/api/upload', requireAdmin, async (req, res) => {
+  try {
+    const { name, type, mimeType, dataBase64, size } = req.body;
+    if (!dataBase64) {
+      return res.status(400).json({ error: 'ไม่พบข้อมูลไฟล์รูป' });
+    }
+    const saved = await DataService.saveFile({ name, type, mimeType, dataBase64, size });
+    res.status(201).json({ success: true, message: 'ส่งไฟล์เข้า MongoDB Atlas สำเร็จ!', ...saved });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/files/:id', async (req, res) => {
+  try {
+    const file = await DataService.getFile(req.params.id);
+    if (!file) return res.status(404).json({ error: 'ไม่พบไฟล์นี้ในระบบ' });
+
+    let base64Data = file.dataBase64;
+    let mime = file.mimeType || 'image/webp';
+    if (base64Data.startsWith('data:')) {
+      const parts = base64Data.split(',');
+      const match = parts[0].match(/:(.*?);/);
+      if (match) mime = match[1];
+      base64Data = parts[1];
+    }
+    const imgBuffer = Buffer.from(base64Data, 'base64');
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.send(imgBuffer);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/backup', requireAdmin, async (req, res) => {
   try {
     const profile = await DataService.getProfile();

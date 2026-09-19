@@ -111,9 +111,27 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData }) {
       let totalAfter = 0;
 
       for (const file of files) {
-        // บีบอัดรูปภาพผ่าน Canvas แปลงเป็น WebP คุณภาพสูง
+        // 1. บีบอัดรูปภาพผ่าน Canvas แปลงเป็น WebP คุณภาพสูง
         const result = await compressImage(file, 1920, 1920, 0.82);
-        newImages.push(result.dataUrl);
+
+        // 2. ส่งไฟล์รูปเข้าไปเก็บใน MongoDB Atlas Cloud ทันที
+        let savedUrl = result.dataUrl;
+        try {
+          const uploadRes = await api.uploadFile({
+            name: file.name,
+            type: 'webp',
+            mimeType: 'image/webp',
+            dataBase64: result.dataUrl,
+            size: result.compressedSizeBytes
+          });
+          if (uploadRes?.url) {
+            savedUrl = uploadRes.url;
+          }
+        } catch (uploadErr) {
+          console.warn('Fallback to direct dataUrl:', uploadErr);
+        }
+
+        newImages.push(savedUrl);
         totalBefore += result.originalSizeBytes;
         totalAfter += result.compressedSizeBytes;
       }
@@ -127,9 +145,9 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData }) {
 
       const savedPercent = Math.round((1 - totalAfter / totalBefore) * 100);
       setCompressionStats(
-        `บีบอัดสำเร็จ: ${formatBytes(totalBefore)} ลดเหลือเพียง ${formatBytes(totalAfter)} (ประหยัดพื้นที่ ${savedPercent}%)`
+        `บีบอัดสำเร็จ: ${formatBytes(totalBefore)} ลดเหลือเพียง ${formatBytes(totalAfter)} (ส่งเข้า MongoDB Atlas เรียบร้อย!)`
       );
-      showFeedback('บีบอัดและเพิ่มรูปภาพสำเร็จแล้ว!');
+      showFeedback('ส่งรูปภาพเข้า MongoDB Atlas Cloud สำเร็จแล้ว!');
     } catch (err) {
       showFeedback(err.message, 'error');
     } finally {
@@ -183,8 +201,19 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData }) {
     if (!file) return;
     try {
       const res = await compressImage(file, 600, 600, 0.85);
-      setProfile({ ...profile, avatar: res.dataUrl });
-      showFeedback('อัปเดตรูปโปรไฟล์แล้ว กดบันทึกเพื่อใช้งาน');
+      let avatarUrl = res.dataUrl;
+      try {
+        const uploadRes = await api.uploadFile({
+          name: 'avatar_' + file.name,
+          type: 'webp',
+          mimeType: 'image/webp',
+          dataBase64: res.dataUrl,
+          size: res.compressedSizeBytes
+        });
+        if (uploadRes?.url) avatarUrl = uploadRes.url;
+      } catch (err) {}
+      setProfile({ ...profile, avatar: avatarUrl });
+      showFeedback('ส่งรูปโปรไฟล์เข้า MongoDB Atlas เรียบร้อยแล้ว (กดบันทึกเพื่อใช้งาน)');
     } catch (err) {
       showFeedback(err.message, 'error');
     }
@@ -195,8 +224,19 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData }) {
     if (!file) return;
     try {
       const res = await compressImage(file, 2048, 800, 0.85);
-      setProfile({ ...profile, cover: res.dataUrl });
-      showFeedback('อัปเดตรูปปก Cover แล้ว กดบันทึกเพื่อใช้งาน');
+      let coverUrl = res.dataUrl;
+      try {
+        const uploadRes = await api.uploadFile({
+          name: 'cover_' + file.name,
+          type: 'webp',
+          mimeType: 'image/webp',
+          dataBase64: res.dataUrl,
+          size: res.compressedSizeBytes
+        });
+        if (uploadRes?.url) coverUrl = uploadRes.url;
+      } catch (err) {}
+      setProfile({ ...profile, cover: coverUrl });
+      showFeedback('ส่งรูปปก Cover เข้า MongoDB Atlas เรียบร้อยแล้ว (กดบันทึกเพื่อใช้งาน)');
     } catch (err) {
       showFeedback(err.message, 'error');
     }

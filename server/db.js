@@ -392,5 +392,51 @@ export const DataService = {
       storageUsedBytes: 1024 * 50,
       storageLimitBytes: 512 * 1024 * 1024
     };
+  },
+
+  // --- Files & Images Storage (เก็บไฟล์รูปและเอกสารลง MongoDB Atlas ทันที) ---
+  async saveFile({ name, type, mimeType, dataBase64, size }) {
+    const fileId = `file-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    const newFile = {
+      id: fileId,
+      name: name || 'unnamed_file',
+      type: type || 'webp',
+      mimeType: mimeType || 'image/webp',
+      dataBase64,
+      size: size || 0,
+      createdAt: new Date().toISOString()
+    };
+
+    const database = await connectDB();
+    if (database) {
+      await database.collection('files').insertOne(newFile);
+      console.log(`📸 ส่งไฟล์รูป [${name}] เข้าไปเก็บใน MongoDB Atlas สำเร็จ! ID: ${fileId}`);
+      return { id: fileId, url: `/api/files/${fileId}`, name, size };
+    }
+
+    const files = readLocalJson('files', []);
+    files.unshift(newFile);
+    writeLocalJson('files', files);
+    return { id: fileId, url: `/api/files/${fileId}`, name, size };
+  },
+
+  async getFile(id) {
+    const database = await connectDB();
+    if (database) {
+      return await database.collection('files').findOne({ id });
+    }
+    const files = readLocalJson('files', []);
+    return files.find(f => f.id === id);
+  },
+
+  async deleteFile(id) {
+    const database = await connectDB();
+    if (database) {
+      await database.collection('files').deleteOne({ id });
+      return true;
+    }
+    const files = readLocalJson('files', []);
+    writeLocalJson('files', files.filter(f => f.id !== id));
+    return true;
   }
 };
