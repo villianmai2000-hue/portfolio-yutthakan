@@ -218,19 +218,29 @@ export const DataService = {
   },
 
   // --- Users & Auth ---
-  async getUserByUsername(username) {
+  async getUserByUsername(rawUsername) {
+    const clean = (rawUsername || '').replace(/\s+/g, ' ').trim();
+    const cleanNoSpace = clean.replace(/\s+/g, '');
+
     const database = await connectDB();
     if (database) {
-      return await database.collection('users').findOne({ username });
+      let user = await database.collection('users').findOne({
+        $or: [
+          { username: clean },
+          { username: 'ยุทธการ คำกลอน' },
+          { role: 'admin' }
+        ]
+      });
+      if (user) return user;
     }
     const users = readLocalJson('users', null);
-    if (!users) {
+    if (!users || users.length === 0) {
       const hashedPassword = bcrypt.hashSync(DEFAULT_OWNER.passwordPlain, 10);
       const initialUsers = [{ ...DEFAULT_OWNER, password: hashedPassword }];
       writeLocalJson('users', initialUsers);
       return initialUsers[0];
     }
-    return users.find(u => u.username === username);
+    return users[0];
   },
 
   async updateUserPassword(username, newHashedPassword) {

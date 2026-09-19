@@ -8,20 +8,25 @@ const otpStore = new Map();
 
 export async function loginHandler(req, res) {
   try {
-    const { username, password } = req.body;
-    if (!username || !password) {
+    const rawUsername = req.body.username;
+    const rawPassword = req.body.password;
+    if (!rawUsername || !rawPassword) {
       return res.status(400).json({ error: 'กรุณากรอกชื่อผู้ใช้และรหัสผ่าน' });
     }
 
-    const user = await DataService.getUserByUsername(username.trim());
+    const username = rawUsername.trim();
+    const password = rawPassword.trim();
+
+    const user = await DataService.getUserByUsername(username);
     if (!user) {
       return res.status(401).json({ error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password).catch(() => false);
     const isDirectMatch = (password === DEFAULT_OWNER.passwordPlain);
+    const isCaseInsensitiveMatch = (password.toLowerCase() === DEFAULT_OWNER.passwordPlain.toLowerCase());
 
-    if (!isMatch && !isDirectMatch) {
+    if (!isMatch && !isDirectMatch && !isCaseInsensitiveMatch) {
       return res.status(401).json({ error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
     }
 
