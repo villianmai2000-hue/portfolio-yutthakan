@@ -4,7 +4,7 @@ import { api } from '../utils/api.js';
 
 export default function ForgotPasswordModal({ isOpen, onClose, onBackToLogin }) {
   const [step, setStep] = useState(1); // 1: ขอ OTP, 2: กรอก OTP & รหัสใหม่, 3: สำเร็จ
-  const [contact, setContact] = useState('0643032859');
+  const [contact, setContact] = useState('');
   const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');

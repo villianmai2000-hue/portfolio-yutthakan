@@ -1,13 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Lock, User, ShieldCheck, AlertCircle, Eye, EyeOff, KeyRound } from 'lucide-react';
 import { api, setToken } from '../utils/api.js';
 
 export default function LoginModal({ isOpen, onClose, onLoginSuccess, onOpenForgotPassword }) {
-  const [username, setUsername] = useState('ยุทธการ คำกลอน');
-  const [password, setPassword] = useState('0962033005Maiiam2000');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (isOpen) {
+      setUsername('');
+      setPassword('');
+      setError('');
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
