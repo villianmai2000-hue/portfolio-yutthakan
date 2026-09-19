@@ -1,0 +1,112 @@
+[
+  {
+    "id": "proj-1",
+    "title": "Modern Minimalist Villa (แบบบ้านโมเดิร์นมินิมอล 2 ชั้น)",
+    "category": "3D SketchUp & Render (.skp)",
+    "description": "งานออกแบบบ้านพักอาศัยสไตล์โมเดิร์น 2 ชั้น พื้นที่ใช้สอย 280 ตร.ม. 3 ห้องนอน 4 ห้องน้ำ พร้อมสระว่ายน้ำ จัดวางทิศทางลมและแสงธรรมชาติอย่างลงตัว",
+    "coverImage": "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80",
+    "images": [
+      "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80"
+    ],
+    "tags": [
+      "SketchUp",
+      "Enscape",
+      "Residential",
+      "3D Model"
+    ],
+    "location": "เชียงใหม่, ประเทศไทย",
+    "year": "2025",
+    "area": "280 ตร.ม.",
+    "files": [
+      {
+        "name": "Modern_Villa_Model.skp",
+        "size": "14.2 MB",
+        "type": "skp",
+        "url": "#"
+      },
+      {
+        "name": "Architectural_Drawings.pdf",
+        "size": "8.5 MB",
+        "type": "pdf",
+        "url": "#"
+      }
+    ],
+    "featured": true,
+    "createdAt": "2026-09-19T11:04:09.622Z"
+  },
+  {
+    "id": "proj-2",
+    "title": "ชุดแบบแปลนก่อสร้างอาคารพาณิชย์ 3 ชั้น (AutoCAD Standard DWG)",
+    "category": "งานเขียนแบบ AutoCAD (.dwg)",
+    "description": "ชุดแบบขออนุญาตก่อสร้างและแบบก่อสร้างจริงครบชุด ประกอบด้วยผังบริเวณ, แปลนพื้นทุกชั้น, รูปด้าน 4 ด้าน, รูปตัด 2 แนว, ผังโครงสร้าง และงานระบบสุขาภิบาล-ไฟฟ้า",
+    "coverImage": "https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=1200&q=80",
+    "images": [
+      "https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=1200&q=80"
+    ],
+    "tags": [
+      "AutoCAD",
+      "DWG",
+      "Working Drawing",
+      "Commercial"
+    ],
+    "location": "กรุงเทพมหานคร",
+    "year": "2025",
+    "area": "450 ตร.ม.",
+    "files": [
+      {
+        "name": "Commercial_Building_Full.dwg",
+        "size": "24.8 MB",
+        "type": "dwg",
+        "url": "#"
+      },
+      {
+        "name": "Building_Permit_Document.pdf",
+        "size": "12.1 MB",
+        "type": "pdf",
+        "url": "#"
+      }
+    ],
+    "featured": true,
+    "createdAt": "2026-09-19T11:04:09.623Z"
+  },
+  {
+    "id": "proj-3",
+    "title": "SketchUp Auto-Quantity Estimator Plugin (ปลั๊กอินถอดปริมาณงาน)",
+    "category": "ปลั๊กอิน & สคริปต์ SketchUp (.rbz)",
+    "description": "Ruby Plugin สำหรับ SketchUp ช่วยคำนวณพื้นที่ผิว ปริมาตรคอนกรีต งานโครงสร้างเหล็ก และส่งออกเป็นตาราง Excel BOQ อัตโนมัติในคลิกเดียว เพิ่มความเร็วในการทำงาน 5 เท่า",
+    "coverImage": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1200&q=80",
+    "images": [
+      "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1200&q=80",
+      "https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1200&q=80"
+    ],
+    "tags": [
+      "SketchUp Plugin",
+      "Ruby",
+      "BOQ",
+      "Automation",
+      "RBZ"
+    ],
+    "location": "Extension Warehouse / Private",
+    "year": "2026",
+    "area": "เวอร์ชัน 2.4.0",
+    "files": [
+      {
+        "name": "AutoQuantityEstimator_v2.4.rbz",
+        "size": "1.8 MB",
+        "type": "rbz",
+        "url": "#"
+      },
+      {
+        "name": "User_Manual_Guide.pdf",
+        "size": "3.4 MB",
+        "type": "pdf",
+        "url": "#"
+      }
+    ],
+    "featured": true,
+    "createdAt": "2026-09-19T11:04:09.623Z"
+  }
+]
