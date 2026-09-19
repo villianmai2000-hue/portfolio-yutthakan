@@ -5,39 +5,17 @@
 
 ---
 
-## 🍃 ขั้นตอนที่ 1: สร้างฐานข้อมูลคลาวด์บน MongoDB Atlas Cloud (ฟรี 512 MB ตลอดชีพ)
+## 🍃 ส่วนที่ 1: ใช้ฐานข้อมูล MongoDB Atlas เดิมของคุณ (ไม่ต้องสมัครใหม่!)
 
-1. เข้าเว็บไซต์ **[mongodb.com/cloud/atlas/register](https://www.mongodb.com/cloud/atlas/register)**
-   - สมัครสมาชิก (สามารถกด Sign up with Google ได้)
-2. เมื่อเข้าสู่ระบบ ให้เลือกสร้างคลัสเตอร์แบบ **M0 (Free)** 
-   - เลือก Region: **Singapore (ap-southeast-1)** (ใกล้ประเทศไทย เร็วที่สุด)
-   - กดปุ่ม **Create Deployment**
-3. **สร้างผู้ใช้ฐานข้อมูล (Database User)**:
-   - ไปที่เมนูด้านซ้าย **Security** -> **Database Access**
-   - กดปุ่ม **Add New Database User**
-   - Authentication Method: เลือก **Password**
-   - ตั้ง **Username** (เช่น `admin_mai`)
-   - ตั้ง **Password** (เช่น `Mai2000Pass!`) *(จดรหัสนี้ไว้)*
-   - Database User Privileges: เลือก **Built-in Role: Read and write to any database**
-   - กด **Add User**
-4. **เปิดสิทธิ์การเข้าถึงจากอินเทอร์เน็ต (Network Access)**:
-   - ไปที่เมนูด้านซ้าย **Security** -> **Network Access**
-   - กดปุ่ม **Add IP Address**
-   - คลิกปุ่ม **ALLOW ACCESS FROM ANYWHERE** (IP จะขึ้นเป็น `0.0.0.0/0`)
-   - กด **Confirm**
-5. **คัดลอกรหัสเชื่อมต่อ (Connection String)**:
-   - ไปที่เมนูด้านซ้าย **Deployment** -> **Database**
-   - ตรงคลัสเตอร์ของคุณ กดปุ่ม **Connect**
-   - เลือกหัวข้อ **Drivers** (Driver: `Node.js`)
-   - คัดลอก Connection String ที่ได้ ซึ่งจะมีหน้าตาแบบนี้:
-     ```text
-     mongodb+srv://admin_mai:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
-     ```
-   - ให้แทนที่คำว่า `<password>` ด้วยรหัสผ่านที่คุณตั้งไว้ในข้อ 3 เช่น:
-     ```text
-     mongodb+srv://admin_mai:Mai2000Pass!@cluster0.xxxxx.mongodb.net/portfolio?retryWrites=true&w=majority
-     ```
-   *(เก็บข้อความนี้ไว้ เพื่อนำไปใส่ใน Vercel)*
+ข่าวดีคือคุณมีคลัสเตอร์ MongoDB Atlas อยู่แล้วจากเว็บสต็อกสินค้า โดยเราสามารถใช้คลัสเตอร์เดิมนี้สร้างฐานข้อมูลชื่อ `yutthakan_portfolio` คู่ขนานไปกับของเดิมได้ทันที โดยไม่กระทบกับข้อมูลสต็อกเดิมเลยแม้แต่น้อย
+
+### รหัสเชื่อมต่อ (Connection String) ของคุณที่พร้อมใช้งานทันที:
+```text
+mongodb+srv://itembase_admin:0962033005Maiiam2000@cluster0.otyldzl.mongodb.net/yutthakan_portfolio?retryWrites=true&w=majority&appName=Cluster0
+```
+- **Cluster**: `Cluster0` (`cluster0.otyldzl.mongodb.net`)
+- **Database Name**: `yutthakan_portfolio` (ระบบสร้างและใส่ข้อมูลเริ่มต้นให้เรียบร้อยแล้ว)
+- คุณสามารถนำข้อความนี้ไปใส่ใน Vercel ได้เลย ไม่ต้องสร้างคลัสเตอร์หรือสมัครสมาชิกใหม่ครับ!
 
 ---
 
