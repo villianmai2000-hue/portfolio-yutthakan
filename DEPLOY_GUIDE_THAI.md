@@ -5,17 +5,17 @@
 
 ---
 
-## 🍃 ส่วนที่ 1: ใช้ฐานข้อมูล MongoDB Atlas เดิมของคุณ (ไม่ต้องสมัครใหม่!)
+## 🍃 ส่วนที่ 1: ฐานข้อมูล MongoDB Atlas (คลัสเตอร์: atlas-aqua-feather)
 
-ข่าวดีคือคุณมีคลัสเตอร์ MongoDB Atlas อยู่แล้วจากเว็บสต็อกสินค้า โดยเราสามารถใช้คลัสเตอร์เดิมนี้สร้างฐานข้อมูลชื่อ `yutthakan_portfolio` คู่ขนานไปกับของเดิมได้ทันที โดยไม่กระทบกับข้อมูลสต็อกเดิมเลยแม้แต่น้อย
+ระบบได้เชื่อมต่อกับคลัสเตอร์ **`atlas-aqua-feather`** ของคุณสำเร็จเรียบร้อยแล้ว 100%!
 
-### รหัสเชื่อมต่อ (Connection String) ของคุณที่พร้อมใช้งานทันที:
+### รหัสเชื่อมต่อ (Connection String) สำหรับนำไปใส่ใน Vercel:
 ```text
-mongodb+srv://itembase_admin:0962033005Maiiam2000@cluster0.otyldzl.mongodb.net/yutthakan_portfolio?retryWrites=true&w=majority&appName=Cluster0
+mongodb+srv://Vercel-Admin-atlas-aqua-feather:0962033005Maiiam2000@atlas-aqua-feather.rmqugy2.mongodb.net/portfolio?retryWrites=true&w=majority&appName=atlas-aqua-feather
 ```
-- **Cluster**: `Cluster0` (`cluster0.otyldzl.mongodb.net`)
-- **Database Name**: `yutthakan_portfolio` (ระบบสร้างและใส่ข้อมูลเริ่มต้นให้เรียบร้อยแล้ว)
-- คุณสามารถนำข้อความนี้ไปใส่ใน Vercel ได้เลย ไม่ต้องสร้างคลัสเตอร์หรือสมัครสมาชิกใหม่ครับ!
+- **Cluster**: `atlas-aqua-feather`
+- **Database**: `portfolio`
+- **สถานะ**: เชื่อมต่อสำเร็จ พร้อมใช้งานเก็บไฟล์รูปและข้อมูลผลงานทันที
 
 ---
 
