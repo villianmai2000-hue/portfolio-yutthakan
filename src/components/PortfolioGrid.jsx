@@ -1,18 +1,21 @@
 import React, { useState, useMemo } from 'react';
 import { Search, Filter, Layers, ExternalLink, Calendar, MapPin, FileDown, Eye, Image as ImageIcon } from 'lucide-react';
 
-const CATEGORIES = [
-  'ทั้งหมด',
-  'งานเขียนแบบ AutoCAD (.dwg)',
-  '3D SketchUp & Render (.skp)',
-  'ปลั๊กอิน & สคริปต์ SketchUp (.rbz)',
-  'งานก่อสร้างและควบคุมงานจริง',
-  'เอกสารแบบแปลน & สเปก (PDF)'
-];
-
-export default function PortfolioGrid({ projects = [], onSelectProject }) {
+export default function PortfolioGrid({ projects = [], categories = [], onSelectProject }) {
   const [selectedCategory, setSelectedCategory] = useState('ทั้งหมด');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // รวมหมวดหมู่ที่มีทั้งหมด เริ่มต้นด้วย 'ทั้งหมด'
+  const allCategories = useMemo(() => {
+    const list = categories && categories.length > 0 ? categories : [
+      'งานเขียนแบบ AutoCAD (.dwg)',
+      '3D SketchUp & Render (.skp)',
+      'ปลั๊กอิน & สคริปต์ SketchUp (.rbz)',
+      'งานก่อสร้างและควบคุมงานจริง',
+      'เอกสารแบบแปลน & สเปก (PDF)'
+    ];
+    return ['ทั้งหมด', ...list];
+  }, [categories]);
 
   const filteredProjects = useMemo(() => {
     return projects.filter(p => {
@@ -57,9 +60,9 @@ export default function PortfolioGrid({ projects = [], onSelectProject }) {
           </div>
         </div>
 
-        {/* Category Pills */}
+        {/* Dynamic Category Pills (ข้อกำหนด 4) */}
         <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-8 scrollbar-none">
-          {CATEGORIES.map(cat => (
+          {allCategories.map(cat => (
             <button
               key={cat}
               onClick={() => setSelectedCategory(cat)}

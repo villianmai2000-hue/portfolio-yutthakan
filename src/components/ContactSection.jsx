@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { 
   Phone, MessageCircle, Mail, MapPin, Send, CheckCircle2, 
-  Sparkles, Clock, AlertCircle, Briefcase, FileCode2 
+  Sparkles, Clock, AlertCircle, Briefcase, FileCode2, Image as ImageIcon,
+  X, UploadCloud
 } from 'lucide-react';
 import { api } from '../utils/api.js';
+import { compressUltraCompact, formatBytes } from '../utils/compressor.js';
 
 export default function ContactSection({ profile, prefilledProject }) {
   const [formData, setFormData] = useState({
@@ -12,11 +14,73 @@ export default function ContactSection({ profile, prefilledProject }) {
     lineId: '',
     projectType: prefilledProject ? `จ้างงานแบบ: ${prefilledProject}` : 'ออกแบบบ้าน / อาคารพักอาศัย',
     budget: '',
-    message: ''
+    message: '',
+    images: []
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  const isNameHidden = profile?.hidePublicName;
+  const isPhoneHidden = profile?.hidePublicPhone;
+  const isEmailHidden = profile?.hidePublicEmail;
+
+  // จัดการอัปโหลดและบีบอัดภาพหน้างานของลูกค้าให้มีขนาดจิ๋วที่สุด (WebP ~30-50KB)
+  const handleCustomerImageUpload = async (e) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+
+    try {
+      setUploadingImage(true);
+      const newImages = [...formData.images];
+
+      for (const file of files) {
+        if (newImages.length >= 5) {
+          alert('แนบภาพได้สูงสุด 5 ภาพครับ');
+          break;
+        }
+        // บีบอัดด้วยระดับ Ultra Compact
+        const res = await compressUltraCompact(file);
+        
+        // ลองส่งเข้าเก็บในเซิร์ฟเวอร์
+        let finalUrl = res.dataUrl;
+        try {
+          const uploadRes = await api.uploadFilePublic({
+            name: 'inquiry_' + file.name,
+            type: 'webp',
+            mimeType: 'image/webp',
+            dataBase64: res.dataUrl,
+            size: res.compressedSizeBytes
+          });
+          if (uploadRes?.url) {
+            finalUrl = uploadRes.url;
+          }
+        } catch (uploadErr) {
+          console.warn('Fallback base64 directly:', uploadErr);
+        }
+
+        newImages.push({
+          url: finalUrl,
+          name: file.name,
+          sizeText: res.compressedSizeText
+        });
+      }
+
+      setFormData(prev => ({ ...prev, images: newImages }));
+    } catch (err) {
+      alert('ไม่สามารถอัปโหลดภาพได้: ' + err.message);
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleRemoveImage = (indexToRemove) => {
+    setFormData(prev => ({
+      ...prev,
+      images: prev.images.filter((_, idx) => idx !== indexToRemove)
+    }));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -29,7 +93,18 @@ export default function ContactSection({ profile, prefilledProject }) {
 
     try {
       setIsSubmitting(true);
-      await api.submitContact(formData);
+      // เตรียม payload ให้พร้อมเก็บเข้า MongoDB Atlas
+      const payload = {
+        name: formData.name,
+        phone: formData.phone,
+        lineId: formData.lineId,
+        projectType: formData.projectType,
+        budget: formData.budget,
+        message: formData.message,
+        images: formData.images.map(img => img.url)
+      };
+
+      await api.submitContact(payload);
       setSubmitSuccess(true);
       setFormData({
         name: '',
@@ -37,7 +112,8 @@ export default function ContactSection({ profile, prefilledProject }) {
         lineId: '',
         projectType: 'ออกแบบบ้าน / อาคารพักอาศัย',
         budget: '',
-        message: ''
+        message: '',
+        images: []
       });
     } catch (err) {
       setErrorMessage(err.message || 'เกิดข้อผิดพลาดในการส่งข้อมูล กรุณาลองใหม่อีกครั้ง');
@@ -50,16 +126,16 @@ export default function ContactSection({ profile, prefilledProject }) {
     <section id="contact" className="py-16 sm:py-24 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
-        {/* Section Heading */}
+        {/* Section Heading - ปรับแต่งได้ตามข้อกำหนด 5 & 9 */}
         <div className="max-w-2xl mx-auto text-center mb-12 sm:mb-16">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-xs font-semibold mb-3">
-            <Sparkles className="w-3.5 h-3.5" /> ติดต่อจ้างงาน & ปรึกษาแบบ
+            <Sparkles className="w-3.5 h-3.5" /> {profile?.contactBadgeText || 'ติดต่อจ้างงาน & ปรึกษาแบบ'}
           </div>
           <h2 className="text-2xl sm:text-4xl font-bold tracking-tight text-slate-900 dark:text-white">
-            ยินดีให้คำปรึกษาและร่วมงานกับคุณ
+            {profile?.contactTitle || 'ยินดีให้คำปรึกษาและร่วมงานกับคุณ'}
           </h2>
           <p className="mt-3 text-sm sm:text-base text-slate-600 dark:text-slate-400">
-            พร้อมรับงานออกแบบสถาปัตยกรรม เขียนแบบ AutoCAD โมเดล 3D SketchUp และเขียนโปรแกรมปลั๊กอิน
+            {profile?.contactSubtitle || 'พร้อมรับงานออกแบบสถาปัตยกรรม เขียนแบบ AutoCAD โมเดล 3D SketchUp และเขียนโปรแกรมปลั๊กอิน'}
           </p>
         </div>
 
@@ -70,7 +146,7 @@ export default function ContactSection({ profile, prefilledProject }) {
             
             {/* LINE Official Card */}
             <a
-              href="https://line.me/ti/p/~0643032859"
+              href={profile?.socials?.line || "https://line.me/ti/p/~0643032859"}
               target="_blank"
               rel="noopener noreferrer"
               className="p-5 rounded-2xl bg-gradient-to-br from-[#06C755]/10 to-emerald-500/10 border border-[#06C755]/30 hover:border-[#06C755] transition-all group flex items-center gap-4 shadow-sm"
@@ -81,37 +157,45 @@ export default function ContactSection({ profile, prefilledProject }) {
               <div className="truncate">
                 <div className="text-xs text-slate-500 dark:text-slate-400">LINE ทักแชทด่วน (เร็วที่สุด)</div>
                 <div className="text-base sm:text-lg font-bold text-slate-900 dark:text-white group-hover:text-[#06C755] transition-colors">
-                  ID: 0643032859
+                  {profile?.lineId ? `LINE ID: ${profile.lineId}` : 'LINE Chat'}
                 </div>
                 <div className="text-xs text-[#06C755] font-medium">กดที่นี่เพื่อเพิ่มเพื่อนคุยงานได้ทันที</div>
               </div>
             </a>
 
-            {/* Direct Phone Card */}
-            <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-md flex-shrink-0">
-                <Phone className="w-6 h-6" />
-              </div>
-              <div>
-                <div className="text-xs text-slate-500 dark:text-slate-400">ติดต่อสายตรง (โทรศัพท์)</div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-0.5">
-                  <a href="tel:0643032859" className="text-sm sm:text-base font-bold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors">
-                    064-303-2859
-                  </a>
-                  <a href="tel:0962033005" className="text-sm sm:text-base font-bold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors">
-                    096-203-3005
-                  </a>
+            {/* Direct Phone Card (แสดงเฉพาะเมื่อไม่ได้ซ่อนเบอร์) */}
+            {!isPhoneHidden && (profile?.phone || profile?.altPhone) && (
+              <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-md flex-shrink-0">
+                  <Phone className="w-6 h-6" />
                 </div>
-                <div className="text-xs text-slate-400 mt-0.5">รับสายทุกวัน เวลา 08:00 - 20:00 น.</div>
+                <div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">ติดต่อสายตรง (โทรศัพท์)</div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-0.5">
+                    {profile?.phone && (
+                      <a href={`tel:${profile.phone}`} className="text-sm sm:text-base font-bold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors">
+                        {profile.phone}
+                      </a>
+                    )}
+                    {profile?.altPhone && (
+                      <a href={`tel:${profile.altPhone}`} className="text-sm sm:text-base font-bold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors">
+                        {profile.altPhone}
+                      </a>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">รับสายทุกวัน เวลา 08:00 - 20:00 น.</div>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Email & Location Card */}
             <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 space-y-3">
-              <div className="flex items-center gap-3 text-slate-700 dark:text-slate-300 text-xs sm:text-sm">
-                <Mail className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-                <span className="truncate">{profile?.email || 'yutthakan.design@gmail.com'}</span>
-              </div>
+              {!isEmailHidden && profile?.email && (
+                <div className="flex items-center gap-3 text-slate-700 dark:text-slate-300 text-xs sm:text-sm">
+                  <Mail className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                  <span className="truncate">{profile.email}</span>
+                </div>
+              )}
               <div className="flex items-center gap-3 text-slate-700 dark:text-slate-300 text-xs sm:text-sm">
                 <MapPin className="w-4 h-4 text-emerald-500 flex-shrink-0" />
                 <span>รับงานทั่วประเทศไทย (บริการออนไลน์ & นัดดูหน้างาน)</span>
@@ -129,8 +213,9 @@ export default function ContactSection({ profile, prefilledProject }) {
             <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
               <Briefcase className="w-5 h-5 text-emerald-500" /> แบบฟอร์มส่งรายละเอียดจ้างงาน
             </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-6">
-              กรอกข้อมูลเบื้องต้นด้านล่าง คุณยุทธการจะติดต่อกลับเพื่อให้คำปรึกษาและประเมินราคาโดยเร็วที่สุดครับ
+            {/* คำอธิบายแบบฟอร์ม - ปรับแต่งได้ตามข้อกำหนด 6 */}
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 leading-relaxed">
+              {profile?.hireFormDesc || 'กรอกข้อมูลเบื้องต้นด้านล่าง จะติดต่อกลับเพื่อให้คำปรึกษาและประเมินราคาโดยเร็วที่สุดครับ สามารถลงรูปได้และบีบอัดให้เล็กที่สุด'}
             </p>
 
             {submitSuccess ? (
@@ -138,7 +223,7 @@ export default function ContactSection({ profile, prefilledProject }) {
                 <CheckCircle2 className="w-12 h-12 text-emerald-600 dark:text-emerald-400 mx-auto" />
                 <h4 className="text-base font-bold text-slate-900 dark:text-white">ส่งข้อมูลเรียบร้อยแล้ว!</h4>
                 <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300">
-                  ขอบคุณที่สนใจผลงานครับ คุณยุทธการได้รับข้อมูลเรียบร้อยแล้วและจะติดต่อกลับทางเบอร์โทรศัพท์หรือ LINE โดยเร็วครับ
+                  ขอบคุณที่สนใจผลงานครับ ได้รับข้อมูลเรียบร้อยแล้วและจะติดต่อกลับโดยเร็วที่สุดครับ
                 </p>
                 <button
                   onClick={() => setSubmitSuccess(false)}
@@ -245,9 +330,56 @@ export default function ContactSection({ profile, prefilledProject }) {
                   />
                 </div>
 
+                {/* ส่วนแนบรูปภาพหน้างาน / แบบอ้างอิง พร้อมระบบย่ออัตโนมัติ (ข้อกำหนด 6) */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <ImageIcon className="w-3.5 h-3.5 text-emerald-500" /> แนบรูปภาพหน้างาน / ภาพอ้างอิง (บีบอัดอัตโนมัติ)
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-normal">สูงสุด 5 ภาพ (WebP จิ๋ว คมชัด)</span>
+                  </label>
+
+                  {/* Thumbnail Previews */}
+                  {formData.images.length > 0 && (
+                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5 mb-2.5">
+                      {formData.images.map((img, idx) => (
+                        <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 group bg-slate-100 dark:bg-slate-800">
+                          <img src={img.url} alt={`แนบ ${idx + 1}`} className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveImage(idx)}
+                            className="absolute top-1 right-1 p-1 rounded-full bg-rose-600 text-white shadow-md hover:bg-rose-700 transition-colors"
+                            title="ลบรูปนี้"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                          <span className="absolute bottom-1 inset-x-1 text-[9px] bg-slate-900/80 text-white text-center rounded px-1 truncate">
+                            {img.sizeText || 'WebP'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Upload button */}
+                  {formData.images.length < 5 && (
+                    <label className={`flex items-center justify-center gap-2 p-3 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500 bg-white dark:bg-slate-900 cursor-pointer transition-colors text-xs text-slate-600 dark:text-slate-300 ${uploadingImage ? 'opacity-50 pointer-events-none' : ''}`}>
+                      <UploadCloud className="w-4 h-4 text-emerald-500" />
+                      <span>{uploadingImage ? 'กำลังย่อขนาดภาพ...' : 'คลิกเพื่อเลือกภาพแนบหน้างาน (ย่ออัตโนมัติ)'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={handleCustomerImageUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
+                </div>
+
                 <button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || uploadingImage}
                   className="w-full py-3 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {isSubmitting ? (

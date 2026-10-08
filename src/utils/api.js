@@ -39,9 +39,14 @@ export const api = {
   requestOtp: (contact) => request('/auth/otp/request', { method: 'POST', body: JSON.stringify({ contact }) }),
   verifyOtpAndReset: (otp, newPassword) => request('/auth/otp/verify', { method: 'POST', body: JSON.stringify({ otp, newPassword }) }),
 
-  // Profile
+  // Profile & Settings
   getProfile: () => request('/profile'),
   updateProfile: (data) => request('/profile', { method: 'PUT', body: JSON.stringify(data) }),
+
+  // Categories
+  getCategories: () => request('/categories'),
+  addCategory: (category) => request('/categories', { method: 'POST', body: JSON.stringify({ category }) }),
+  deleteCategory: (name) => request(`/categories/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 
   // Projects
   getProjects: () => request('/projects'),
@@ -50,15 +55,31 @@ export const api = {
   updateProject: (id, data) => request(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProject: (id) => request(`/projects/${id}`, { method: 'DELETE' }),
 
-  // Contact Messages
+  // Contact & Inquiries
   submitContact: (data) => request('/contact', { method: 'POST', body: JSON.stringify(data) }),
   getMessages: () => request('/contact'),
   updateMessageStatus: (id, status) => request(`/contact/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
 
-  // File & Image Storage in MongoDB Atlas
-  uploadFile: (data) => request('/upload', { method: 'POST', body: JSON.stringify(data) }),
+  // Private Vault (PIN Lock)
+  verifyVaultPin: (pin) => request('/vault/verify-pin', { method: 'POST', body: JSON.stringify({ pin }) }),
+  setVaultPin: (newPin) => request('/vault/set-pin', { method: 'POST', body: JSON.stringify({ newPin }) }),
+  getVaultItems: () => request('/vault/items'),
+  addVaultItem: (item) => request('/vault/items', { method: 'POST', body: JSON.stringify(item) }),
+  deleteVaultItem: (id) => request(`/vault/items/${id}`, { method: 'DELETE' }),
 
-  // System & Backup
+  // Construction Site Logs & Inspection
+  getSiteLogs: () => request('/site-logs'),
+  createSiteLog: (data) => request('/site-logs', { method: 'POST', body: JSON.stringify(data) }),
+  updateSiteLog: (id, data) => request(`/site-logs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteSiteLog: (id) => request(`/site-logs/${id}`, { method: 'DELETE' }),
+  submitSiteFeedback: (id, feedback) => request(`/site-logs/${id}/feedback`, { method: 'POST', body: JSON.stringify(feedback) }),
+  acknowledgeSiteLog: (id, statusData) => request(`/site-logs/${id}/acknowledge`, { method: 'PUT', body: JSON.stringify(statusData) }),
+
+  // File Upload (Admin & Public)
+  uploadFile: (data) => request('/upload', { method: 'POST', body: JSON.stringify(data) }),
+  uploadFilePublic: (data) => request('/upload-public', { method: 'POST', body: JSON.stringify(data) }),
+
+  // System Status & Backup
   getStatus: () => request('/status'),
   getBackupUrl: () => `${BASE_URL}/backup`
 };

@@ -2,13 +2,13 @@ import React, { useState, useEffect } from 'react';
 import Navbar from './components/Navbar.jsx';
 import HeroProfile from './components/HeroProfile.jsx';
 import PortfolioGrid from './components/PortfolioGrid.jsx';
+import SiteLogsSection from './components/SiteLogsSection.jsx';
 import ProjectDetailModal from './components/ProjectDetailModal.jsx';
 import ContactSection from './components/ContactSection.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
 import LoginModal from './components/LoginModal.jsx';
 import ForgotPasswordModal from './components/ForgotPasswordModal.jsx';
 import { api, getToken, removeToken } from './utils/api.js';
-import { Phone, MessageCircle, Mail, Heart, Sparkles } from 'lucide-react';
 
 export default function App() {
   const [darkMode, setDarkMode] = useState(() => {
@@ -19,6 +19,8 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [projects, setProjects] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [siteLogs, setSiteLogs] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [prefilledProjectForHire, setPrefilledProjectForHire] = useState('');
 
@@ -41,12 +43,16 @@ export default function App() {
   // Initial Data Load
   const loadData = async () => {
     try {
-      const [prof, projs] = await Promise.all([
+      const [prof, projs, cats, logs] = await Promise.all([
         api.getProfile(),
-        api.getProjects()
+        api.getProjects(),
+        api.getCategories().catch(() => []),
+        api.getSiteLogs().catch(() => [])
       ]);
       setProfile(prof);
       setProjects(projs);
+      setCategories(cats.length ? cats : (prof?.categories || []));
+      setSiteLogs(logs);
     } catch (err) {
       console.error('Error loading data:', err);
     }
@@ -56,7 +62,7 @@ export default function App() {
     loadData();
     const token = getToken();
     if (token) {
-      setCurrentUser({ name: 'ยุทธการ คำกลอน', role: 'admin' });
+      setCurrentUser({ name: 'Admin', role: 'admin' });
     }
   }, []);
 
@@ -76,10 +82,19 @@ export default function App() {
     if (el) el.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const handleScrollToSiteLogs = () => {
+    const el = document.getElementById('sitelogs');
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  };
+
   const handleHireForProject = (projectTitle) => {
     setPrefilledProjectForHire(projectTitle);
     handleScrollToContact();
   };
+
+  const isNameHidden = profile?.hidePublicName;
+  const isPhoneHidden = profile?.hidePublicPhone;
+  const footerTitle = isNameHidden ? 'แฟ้มสะสมผลงาน สถาปัตยกรรม & 3D' : (profile?.name || 'ยุทธการ คำกลอน');
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-300">
@@ -89,6 +104,7 @@ export default function App() {
         darkMode={darkMode}
         setDarkMode={setDarkMode}
         currentUser={currentUser}
+        profile={profile}
         onOpenLogin={() => setIsLoginOpen(true)}
         onOpenAdmin={() => setIsAdminOpen(true)}
         onLogout={handleLogout}
@@ -101,12 +117,20 @@ export default function App() {
           profile={profile}
           onScrollToContact={handleScrollToContact}
           onScrollToPortfolio={handleScrollToPortfolio}
+          onScrollToSiteLogs={handleScrollToSiteLogs}
         />
 
-        {/* Portfolio Showcase Grid */}
+        {/* Portfolio Showcase Grid with Dynamic Categories */}
         <PortfolioGrid
           projects={projects}
+          categories={categories}
           onSelectProject={(proj) => setSelectedProject(proj)}
+        />
+
+        {/* Construction Daily Log & Inspection Section (Public if toggled) */}
+        <SiteLogsSection
+          siteLogs={siteLogs}
+          onRefreshLogs={loadData}
         />
 
         {/* Contact & Hire Me Section */}
@@ -120,12 +144,12 @@ export default function App() {
       <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-10 transition-colors">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500 dark:text-slate-400">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-800 dark:text-white">ยุทธการ คำกลอน</span>
+            <span className="font-bold text-slate-800 dark:text-white">{footerTitle}</span>
             <span>• แฟ้มสะสมผลงานสถาปัตยกรรม & โมเดล 3D ออกแบบใช้งานระยะยาว 10–20 ปี</span>
           </div>
           <div className="flex items-center gap-4">
-            <span>เบอร์ติดต่อ: 064-303-2859</span>
-            <span>LINE: 0643032859</span>
+            {!isPhoneHidden && profile?.phone && <span>เบอร์ติดต่อ: {profile.phone}</span>}
+            {profile?.lineId && <span>LINE: {profile.lineId}</span>}
           </div>
         </div>
       </footer>

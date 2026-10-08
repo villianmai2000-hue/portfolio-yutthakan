@@ -1,32 +1,37 @@
 import React from 'react';
-import { Shield, Sun, Moon, LogIn, LogOut, Layers, MessageSquare, Briefcase, User } from 'lucide-react';
+import { Shield, Sun, Moon, LogIn, LogOut, Layers, MessageSquare, Briefcase, User, ClipboardList } from 'lucide-react';
 
 export default function Navbar({ 
   darkMode, 
   setDarkMode, 
   currentUser, 
+  profile,
   onOpenLogin, 
   onOpenAdmin, 
   onLogout 
 }) {
+  const isNameHidden = profile?.hidePublicName;
+  const displayName = isNameHidden ? 'แฟ้มสะสมผลงาน สถาปัตยกรรม & 3D' : (profile?.name || 'ยุทธการ คำกลอน');
+  const logoChar = isNameHidden ? 'A' : (displayName ? displayName.charAt(0) : 'ย');
+
   return (
-    <header className="sticky top-0 z-40 w-full glass-nav bg-white/80 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 transition-colors duration-200 shadow-sm">
+    <header className="sticky top-0 z-40 w-full glass-nav bg-white/85 dark:bg-slate-900/85 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 transition-colors duration-200 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         
         {/* Logo & Identity */}
         <a href="#home" className="flex items-center gap-3 group">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-700 flex items-center justify-center text-white font-bold text-lg shadow-md shadow-emerald-500/20 group-hover:scale-105 transition-transform">
-            ย
+            {logoChar}
           </div>
           <div>
             <div className="font-bold text-base sm:text-lg tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-              ยุทธการ คำกลอน
+              <span>{displayName}</span>
               <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-normal border border-emerald-300/40">
                 Portfolio
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">
-              Architectural Design • 3D SketchUp • AutoCAD
+              {profile?.title || 'Architectural Design • 3D SketchUp • AutoCAD'}
             </p>
           </div>
         </a>
@@ -39,16 +44,27 @@ export default function Navbar({
           <a href="#portfolio" className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors flex items-center gap-1.5">
             <Layers className="w-4 h-4" /> ผลงานทั้งหมด
           </a>
-          <a href="#about" className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors flex items-center gap-1.5">
-            <User className="w-4 h-4" /> ประวัติและทักษะ
+          <a href="#sitelogs" className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-medium">
+            <ClipboardList className="w-4 h-4" /> ตรวจงานก่อสร้าง & บันทึก
           </a>
           <a href="#contact" className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold">
-            <Briefcase className="w-4 h-4" /> ติดต่อจ้างงาน
+            <Briefcase className="w-4 h-4" /> {profile?.contactBadgeText || 'ติดต่อจ้างงาน'}
           </a>
         </nav>
 
         {/* Action Controls */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Work status pill (Navbar compact) */}
+          {profile?.workStatus?.showPublic !== false && (
+            <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[11px] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+              <span className={`w-2 h-2 rounded-full ${
+                profile?.workStatus?.status === 'busy' ? 'bg-amber-500' :
+                profile?.workStatus?.status === 'in_progress' ? 'bg-blue-500' : 'bg-emerald-500 animate-pulse'
+              }`} />
+              <span>{profile?.workStatus?.text || 'พร้อมรับงานทันที'}</span>
+            </div>
+          )}
+
           {/* Dark / Light Toggle */}
           <button
             onClick={() => setDarkMode(!darkMode)}

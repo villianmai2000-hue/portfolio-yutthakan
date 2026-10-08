@@ -9,11 +9,13 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess, onOpenForg
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // ล้างค่าไอดีและรหัสผ่านทุกครั้งที่เปิดโมดอล เพื่อไม่ให้มีข้อมูลค้างอยู่ (ข้อกำหนด 7)
   useEffect(() => {
     if (isOpen) {
       setUsername('');
       setPassword('');
       setError('');
+      setShowPassword(false);
     }
   }, [isOpen]);
 
@@ -29,6 +31,8 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess, onOpenForg
       if (res.token) {
         setToken(res.token);
         onLoginSuccess(res.user);
+        setUsername('');
+        setPassword('');
         onClose();
       }
     } catch (err) {
@@ -53,9 +57,10 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess, onOpenForg
           <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto mb-3 shadow-inner">
             <ShieldCheck className="w-6 h-6" />
           </div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white">เข้าสู่ระบบเฉพาะเจ้าของ</h2>
+          {/* ซ่อนชื่อบุคคลตามข้อกำหนด 1 */}
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white">เข้าสู่ระบบจัดการหลังบ้าน</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            แดชบอร์ดจัดการผลงานและระบบสำหรับคุณ ยุทธการ คำกลอน
+            แดชบอร์ดเฉพาะเจ้าของ สำหรับจัดการผลงาน สถาปัตยกรรม & 3D
           </p>
         </div>
 
@@ -66,19 +71,20 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess, onOpenForg
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              ชื่อผู้ใช้ (Owner Name)
+              ชื่อผู้ใช้ (Admin Username)
             </label>
             <div className="relative">
               <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 required
+                autoComplete="off"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="ยุทธการ คำกลอน"
+                placeholder="กรอกชื่อผู้ใช้สำหรับเข้าหลังบ้าน"
                 className="w-full pl-10 pr-4 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500/50 outline-none"
               />
             </div>
@@ -105,9 +111,10 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess, onOpenForg
               <input
                 type={showPassword ? 'text' : 'password'}
                 required
+                autoComplete="new-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="รหัสผ่านเข้าหลังบ้าน"
+                placeholder="กรอกรหัสผ่านเข้าหลังบ้าน"
                 className="w-full pl-10 pr-10 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500/50 outline-none"
               />
               <button

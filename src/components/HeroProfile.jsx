@@ -1,8 +1,13 @@
 import React from 'react';
-import { Phone, MessageCircle, Download, CheckCircle2, Award, Briefcase, FileCode2, Sparkles, ArrowRight } from 'lucide-react';
+import { Phone, MessageCircle, Download, CheckCircle2, Award, Briefcase, FileCode2, Sparkles, ArrowRight, ClipboardList } from 'lucide-react';
 
-export default function HeroProfile({ profile, onScrollToContact, onScrollToPortfolio }) {
+export default function HeroProfile({ profile, onScrollToContact, onScrollToPortfolio, onScrollToSiteLogs }) {
   if (!profile) return null;
+
+  const isNameHidden = profile.hidePublicName;
+  const isPhoneHidden = profile.hidePublicPhone;
+  const displayName = isNameHidden ? 'สถาปัตยกรรม & ออกแบบโมเดล 3D' : profile.name;
+  const workStatus = profile.workStatus || { status: 'available', text: 'พร้อมรับงานทันที', showPublic: true };
 
   return (
     <section id="home" className="relative pt-6 pb-14 sm:pb-20 overflow-hidden">
@@ -19,11 +24,20 @@ export default function HeroProfile({ profile, onScrollToContact, onScrollToPort
           />
           <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/40 to-transparent" />
           
-          <div className="absolute top-4 right-4 sm:top-6 sm:right-6 flex items-center gap-2 bg-slate-900/80 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-slate-700 text-xs text-white">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 -ml-4" />
-            <span className="font-medium">พร้อมรับงานออกแบบ & เขียนแบบ</span>
-          </div>
+          {/* Work Status Badge on Cover */}
+          {workStatus.showPublic !== false && (
+            <div className="absolute top-4 right-4 sm:top-6 sm:right-6 flex items-center gap-2 bg-slate-900/85 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-slate-700/80 text-xs text-white shadow-lg">
+              <span className={`w-2.5 h-2.5 rounded-full ${
+                workStatus.status === 'busy' ? 'bg-amber-400' :
+                workStatus.status === 'in_progress' ? 'bg-blue-400' : 'bg-emerald-400 animate-ping'
+              }`} />
+              <span className={`w-2.5 h-2.5 rounded-full -ml-4 ${
+                workStatus.status === 'busy' ? 'bg-amber-500' :
+                workStatus.status === 'in_progress' ? 'bg-blue-500' : 'bg-emerald-500'
+              }`} />
+              <span className="font-medium">{workStatus.text || 'พร้อมรับงานออกแบบ & เขียนแบบ'}</span>
+            </div>
+          )}
         </div>
 
         {/* Profile Info Overlay Container */}
@@ -37,7 +51,7 @@ export default function HeroProfile({ profile, onScrollToContact, onScrollToPort
                 <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-2xl sm:rounded-3xl overflow-hidden border-4 border-white dark:border-slate-900 shadow-2xl bg-slate-100 dark:bg-slate-800 ring-4 ring-emerald-500/20">
                   <img
                     src={profile.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'}
-                    alt={profile.name}
+                    alt={displayName}
                     className="w-full h-full object-cover"
                   />
                 </div>
@@ -48,7 +62,7 @@ export default function HeroProfile({ profile, onScrollToContact, onScrollToPort
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-slate-900 dark:text-white">
-                      {profile.name}
+                      {displayName}
                     </h1>
                     <p className="text-sm sm:text-base text-emerald-600 dark:text-emerald-400 font-medium mt-1 flex items-center justify-center md:justify-start gap-1.5">
                       <Sparkles className="w-4 h-4" />
@@ -63,27 +77,31 @@ export default function HeroProfile({ profile, onScrollToContact, onScrollToPort
                       className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-md shadow-emerald-600/25 transition-all flex items-center gap-2 group"
                     >
                       <Briefcase className="w-4 h-4" />
-                      <span>จ้างงาน / ส่งรายละเอียด</span>
+                      <span>{profile.contactBadgeText || 'จ้างงาน / ส่งรายละเอียด'}</span>
                       <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                     </button>
 
+                    {/* LINE Button */}
                     <a
-                      href="https://line.me/ti/p/~0643032859"
+                      href={profile.socials?.line || "https://line.me/ti/p/~0643032859"}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="px-4 py-2.5 rounded-xl bg-[#06C755] hover:bg-[#05b34c] text-white text-sm font-semibold shadow-sm transition-all flex items-center gap-2"
                     >
                       <MessageCircle className="w-4 h-4" />
-                      <span>ทัก LINE: 0643032859</span>
+                      <span>แชท LINE คุยงาน</span>
                     </a>
 
-                    <a
-                      href="tel:0643032859"
-                      className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition-colors"
-                      title="โทร 064-303-2859"
-                    >
-                      <Phone className="w-4 h-4 text-emerald-500" />
-                    </a>
+                    {/* Direct Phone button only if not hidden */}
+                    {!isPhoneHidden && profile.phone && (
+                      <a
+                        href={`tel:${profile.phone}`}
+                        className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition-colors"
+                        title={`โทร ${profile.phone}`}
+                      >
+                        <Phone className="w-4 h-4 text-emerald-500" />
+                      </a>
+                    )}
                   </div>
                 </div>
 
