@@ -223,9 +223,9 @@ if (fs.existsSync(distPath)) {
 
 // เริ่มต้นเชื่อมต่อ MongoDB Atlas
 connectDB().then(() => {
-  if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  if (!process.env.VERCEL) {
     app.listen(PORT, () => {
-      console.log(`🚀 Portfolio Server running at http://localhost:${PORT}`);
+      console.log(`🚀 Portfolio Server running at port ${PORT}`);
     });
   }
 });
