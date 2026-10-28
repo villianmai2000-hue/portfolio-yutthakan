@@ -35,19 +35,19 @@ export async function compressImage(file, maxWidth = 1600, maxHeight = 1600, qua
 
         // วาดลง Canvas ด้วย Canvas Image Smoothing คุณภาพสูง
         const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d', { alpha: false }); // ปิด alpha เพื่อบีบอัดได้เล็กลงอีก
+        canvas.width = Math.max(1, width);
+        canvas.height = Math.max(1, height);
+        const ctx = canvas.getContext('2d', { alpha: false });
         
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         
-        // เติมพื้นหลังสีขาวกรณีภาพมีพื้นหลังโปร่งใส (เพื่อลดขนาด WebP)
+        // เติมพื้นหลังสีขาวกรณีภาพมีพื้นหลังโปร่งใส (เพื่อลดขนาด WebP/JPEG)
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
 
-        // แปลงเป็น WebP (บีบอัดได้ดีกว่า JPEG 30-40% ในความชัดเท่าเดิม)
+        // แปลงเป็น WebP คุณภาพสูง ถ้าเบราว์เซอร์ไม่รองรับให้ fallback เป็น JPEG
         let dataUrl = canvas.toDataURL('image/webp', quality);
         if (!dataUrl.startsWith('data:image/webp')) {
           dataUrl = canvas.toDataURL('image/jpeg', quality);
@@ -94,10 +94,11 @@ export async function compressImage(file, maxWidth = 1600, maxHeight = 1600, qua
 
 /**
  * บีบอัดระดับ Ultra สำหรับรูปถ่ายหน้างาน / แนบใบจ้างงาน / รูปถ่ายรอยร้าว
- * ลดลงเหลือขนาดจิ๋ว ~25-50 KB เพื่อประหยัดพื้นที่คลาวด์สูงสุด
+ * คืนค่าเป็น string Data URL โดยตรงเสมอ เพื่อป้องกันปัญหา [object Object]
  */
-export async function compressUltraCompact(file) {
-  return compressImage(file, 1280, 1280, 0.70);
+export async function compressUltraCompact(file, maxWidth = 1280, maxHeight = 1280, quality = 0.72) {
+  const result = await compressImage(file, maxWidth, maxHeight, quality);
+  return result.dataUrl;
 }
 
 export function formatBytes(bytes, decimals = 1) {

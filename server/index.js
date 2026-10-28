@@ -39,19 +39,19 @@ function isOptionalAdmin(req) {
 app.get('/api/health', async (req, res) => {
   const status = await DataService.getDBStatus();
   res.json({
-    status: 'online',
-    app: 'Yutthakan Portfolio & Architectural Management API',
-    database: status,
-    timestamp: new Date().toISOString()
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    database: status.mode
   });
 });
 
-// Auth Routes
+// Authentication Routes
 app.post('/api/auth/login', loginHandler);
 app.post('/api/auth/otp/request', requestOtpHandler);
 app.post('/api/auth/otp/verify', verifyOtpAndResetHandler);
 
-// Profile & Settings
+// Profile & Personal Information
 app.get('/api/profile', async (req, res) => {
   try {
     const profile = await DataService.getProfile();
@@ -70,7 +70,7 @@ app.put('/api/profile', requireAdmin, async (req, res) => {
   }
 });
 
-// Categories Management (เพิ่ม/ลบ หมวดหมู่ผลงาน)
+// Categories Management
 app.get('/api/categories', async (req, res) => {
   try {
     const categories = await DataService.getCategories();
@@ -84,10 +84,10 @@ app.post('/api/categories', requireAdmin, async (req, res) => {
   try {
     const { category } = req.body;
     if (!category || !category.trim()) {
-      return res.status(400).json({ error: 'กรุณากรอกชื่อหมวดหมู่' });
+      return res.status(400).json({ error: 'กรุณาระบุชื่อหมวดหมู่' });
     }
-    const categories = await DataService.addCategory(category);
-    res.json(categories);
+    const categories = await DataService.addCategory(category.trim());
+    res.status(201).json(categories);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -95,14 +95,14 @@ app.post('/api/categories', requireAdmin, async (req, res) => {
 
 app.delete('/api/categories/:name', requireAdmin, async (req, res) => {
   try {
-    const categories = await DataService.deleteCategory(req.params.name);
+    const categories = await DataService.deleteCategory(decodeURIComponent(req.params.name));
     res.json(categories);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Projects CRUD
+// Projects Showcase
 app.get('/api/projects', async (req, res) => {
   try {
     const projects = await DataService.getProjects();
@@ -115,7 +115,7 @@ app.get('/api/projects', async (req, res) => {
 app.get('/api/projects/:id', async (req, res) => {
   try {
     const project = await DataService.getProjectById(req.params.id);
-    if (!project) return res.status(404).json({ error: 'ไม่พบโปรเจกต์นี้' });
+    if (!project) return res.status(404).json({ error: 'ไม่พบผลงานนี้' });
     res.json(project);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -124,8 +124,8 @@ app.get('/api/projects/:id', async (req, res) => {
 
 app.post('/api/projects', requireAdmin, async (req, res) => {
   try {
-    const created = await DataService.createProject(req.body);
-    res.status(201).json(created);
+    const project = await DataService.createProject(req.body);
+    res.status(201).json(project);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -133,9 +133,9 @@ app.post('/api/projects', requireAdmin, async (req, res) => {
 
 app.put('/api/projects/:id', requireAdmin, async (req, res) => {
   try {
-    const updated = await DataService.updateProject(req.params.id, req.body);
-    if (!updated) return res.status(404).json({ error: 'ไม่พบโปรเจกต์นี้' });
-    res.json(updated);
+    const project = await DataService.updateProject(req.params.id, req.body);
+    if (!project) return res.status(404).json({ error: 'ไม่พบผลงานนี้' });
+    res.json(project);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -144,35 +144,13 @@ app.put('/api/projects/:id', requireAdmin, async (req, res) => {
 app.delete('/api/projects/:id', requireAdmin, async (req, res) => {
   try {
     await DataService.deleteProject(req.params.id);
-    res.json({ success: true, message: 'ลบผลงานเรียบร้อยแล้ว' });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Hire Me Messages (รองรับรูปถ่ายที่ลูกค้าแนบมา)
-app.post('/api/contact', async (req, res) => {
-  try {
-    const { name, phone, lineId, projectType, budget, message, images } = req.body;
-    if (!name || (!phone && !lineId)) {
-      return res.status(400).json({ error: 'กรุณากรอกชื่อ และเบอร์โทรหรือ LINE ID เพื่อให้ติดต่อกลับได้' });
-    }
-    const saved = await DataService.createMessage({
-      name,
-      phone,
-      lineId,
-      projectType,
-      budget,
-      message,
-      images: Array.isArray(images) ? images : [],
-      createdAt: new Date().toISOString()
-    });
-    res.status(201).json({ success: true, message: 'ส่งข้อความจ้างงานเรียบร้อยแล้ว ขอบคุณที่สนใจครับ!', data: saved });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
+// Contact & Messages (Client Inquiries)
 app.get('/api/contact', requireAdmin, async (req, res) => {
   try {
     const messages = await DataService.getMessages();
@@ -182,10 +160,27 @@ app.get('/api/contact', requireAdmin, async (req, res) => {
   }
 });
 
+app.post('/api/contact', async (req, res) => {
+  try {
+    const { name, phone, message } = req.body;
+    if (!name || (!phone && !req.body.lineId && !req.body.email)) {
+      return res.status(400).json({ error: 'กรุณากรอกชื่อและช่องทางติดต่อ (เบอร์โทร, LINE หรืออีเมล)' });
+    }
+    const newMessage = await DataService.createMessage(req.body);
+    res.status(201).json({
+      success: true,
+      message: 'ส่งข้อความติดต่อเรียบร้อยแล้ว คุณยุทธการจะติดต่อกลับโดยเร็วที่สุดครับ',
+      data: newMessage
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.put('/api/contact/:id', requireAdmin, async (req, res) => {
   try {
     const { status } = req.body;
-    await DataService.updateMessageStatus(req.params.id, status || 'contacted');
+    await DataService.updateMessageStatus(req.params.id, status);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -195,19 +190,23 @@ app.put('/api/contact/:id', requireAdmin, async (req, res) => {
 app.delete('/api/contact/:id', requireAdmin, async (req, res) => {
   try {
     await DataService.deleteMessage(req.params.id);
-    res.json({ success: true, message: 'ลบข้อความเรียบร้อย' });
+    res.json({ success: true, message: 'ลบข้อความจ้างงานเรียบร้อย' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// --- Private Vault (คลังข้อมูลส่วนตัว / อีเมลกันลืม ป้องกันด้วยรหัส PIN แยก) ---
+// --- Private Vault (คลังข้อมูลส่วนตัว / PIN ล็อกแยก 0966390496) ---
 app.post('/api/vault/verify-pin', requireAdmin, async (req, res) => {
   try {
     const { pin } = req.body;
     if (!pin) return res.status(400).json({ error: 'กรุณากรอกรหัส PIN' });
     const result = await DataService.verifyVaultPin(pin);
-    res.json(result);
+    if (!result.success) {
+      return res.status(401).json({ error: 'รหัส PIN ไม่ถูกต้อง' });
+    }
+    const items = await DataService.getVaultItems();
+    res.json({ success: true, items });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -276,7 +275,7 @@ app.post('/api/site-logs', requireAdmin, async (req, res) => {
 app.put('/api/site-logs/:id', requireAdmin, async (req, res) => {
   try {
     const updated = await DataService.updateSiteLog(req.params.id, req.body);
-    if (!updated) return res.status(404).json({ error: 'ไม่พบบันทึกงานนี้' });
+    if (!updated) return res.status(404).json({ error: 'ไม่พบบันทึกนี้' });
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -286,87 +285,31 @@ app.put('/api/site-logs/:id', requireAdmin, async (req, res) => {
 app.delete('/api/site-logs/:id', requireAdmin, async (req, res) => {
   try {
     await DataService.deleteSiteLog(req.params.id);
-    res.json({ success: true, message: 'ลบบันทึกงานเรียบร้อย' });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ผู้ชมเว็ปไซต์ส่ง Feedback / ข้อเสนอแนะ / ติ๊กแก้ไขทิศทาง
 app.post('/api/site-logs/:id/feedback', async (req, res) => {
   try {
     const feedback = await DataService.addSiteLogFeedback(req.params.id, req.body);
-    res.status(201).json({ success: true, feedback });
+    res.status(201).json({ success: true, data: feedback });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// แอดมินกดรับเรื่อง และกำหนดสถานะ / วันที่เสร็จ
-app.put('/api/site-logs/:id/acknowledge', requireAdmin, async (req, res) => {
+app.put('/api/site-logs/:id/feedback/:index/respond', requireAdmin, async (req, res) => {
   try {
-    const updated = await DataService.acknowledgeSiteLogFeedback(req.params.id, req.body);
-    res.json({ success: true, log: updated });
+    await DataService.respondFeedback(req.params.id, req.params.index, req.body);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// File Upload & Serving Endpoint
-app.post('/api/upload', requireAdmin, async (req, res) => {
-  try {
-    const { name, type, mimeType, dataBase64, size } = req.body;
-    if (!dataBase64) {
-      return res.status(400).json({ error: 'ไม่พบข้อมูลไฟล์รูป' });
-    }
-    const saved = await DataService.saveFile({ name, type, mimeType, dataBase64, size });
-    res.status(201).json({ success: true, message: 'ส่งไฟล์เข้า MongoDB Atlas สำเร็จ!', ...saved });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Public image upload สำหรับลูกค้าส่งรูปแนบใบจ้างงาน หรือรายงานหน้างาน
-app.post('/api/upload-public', async (req, res) => {
-  try {
-    const { name, type, mimeType, dataBase64, size } = req.body;
-    if (!dataBase64) {
-      return res.status(400).json({ error: 'ไม่พบข้อมูลไฟล์รูป' });
-    }
-    // ตรวจสอบขนาดไม่ให้เกิน 3MB ต่อรูป
-    if (size && size > 3 * 1024 * 1024) {
-      return res.status(400).json({ error: 'ไฟล์ภาพขนาดใหญ่เกินไป' });
-    }
-    const saved = await DataService.saveFile({ name, type: type || 'webp', mimeType: mimeType || 'image/webp', dataBase64, size });
-    res.status(201).json({ success: true, ...saved });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/files/:id', async (req, res) => {
-  try {
-    const file = await DataService.getFile(req.params.id);
-    if (!file) return res.status(404).json({ error: 'ไม่พบไฟล์นี้ในระบบ' });
-
-    let base64Data = file.dataBase64;
-    let mime = file.mimeType || 'image/webp';
-    if (base64Data.startsWith('data:')) {
-      const parts = base64Data.split(',');
-      const match = parts[0].match(/:(.*?);/);
-      if (match) mime = match[1];
-      base64Data = parts[1];
-    }
-    const imgBuffer = Buffer.from(base64Data, 'base64');
-    res.setHeader('Content-Type', mime);
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    res.send(imgBuffer);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// --- Rebar Cutting List & Real-time Two-Way Sync (AutoCAD & SketchUp) ---
+// --- Rebar Cutting List & BBS (ถอดเหล็กเส้น & ตารางตัดเศษ) ---
 app.get('/api/rebar', async (req, res) => {
   try {
     const items = await DataService.getRebarItems();
@@ -423,6 +366,44 @@ app.post('/api/rebar/sync', async (req, res) => {
   }
 });
 
+// --- Rebar Offcuts API (คลังเศษเหล็กสะสม & การนำเศษกลับมาใช้) ---
+app.get('/api/rebar/offcuts', async (req, res) => {
+  try {
+    const offcuts = await DataService.getRebarOffcuts();
+    res.json(offcuts);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/rebar/offcuts/:id', async (req, res) => {
+  try {
+    const updated = await DataService.updateRebarOffcut(req.params.id, req.body);
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/rebar/offcuts/:id/use', async (req, res) => {
+  try {
+    const { usedFor } = req.body;
+    const ok = await DataService.markOffcutUsed(req.params.id, usedFor);
+    res.json({ success: ok });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/rebar/offcuts/:id', async (req, res) => {
+  try {
+    await DataService.deleteRebarOffcut(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Download AutoCAD AutoLISP Plugin (.lsp)
 app.get('/api/rebar/plugin/autocad.lsp', (req, res) => {
   const host = req.get('host') || 'localhost:3000';
@@ -437,10 +418,11 @@ app.get('/api/rebar/plugin/autocad.lsp', (req, res) => {
 
 (defun c:REBAR_HELP ()
   (princ "\\n=======================================================")
-  (princ "\\nคำสั่งปลั๊กอินถอดเหล็กเส้น (Bar Bending Schedule - BBS):")
-  (princ "\\n  REBAR_SYNC - ส่งข้อมูลเหล็กขึ้นเว็บไซต์ Real-Time ทันที")
-  (princ "\\n  REBAR_DRAW - ดึงข้อมูลเหล็กจากระบบ Cloud มาวาดตารางลง DWG")
-  (princ "\\n  REBAR_WEB  - เปิดหน้าเว็บจัดการเหล็กเส้นบน Web Browser")
+  (princ "\\nคำสั่งปลั๊กอินถอดเหล็กเส้นและคลังเศษ (BBS System):")
+  (princ "\\n  REBAR_SYNC     - ส่งข้อมูลตัดเหล็กจาก CAD ขึ้นเว็บ Real-Time")
+  (princ "\\n  REBAR_DRAW     - วาดตาราง BBS สวยงามลงใน Drawing อัตโนมัติ")
+  (princ "\\n  REBAR_OFFCUTS  - ดึงรายการเศษเหล็กคงเหลือสะสมมาดูใน CAD")
+  (princ "\\n  REBAR_WEB      - เปิดหน้าเว็บจัดการเหล็กเส้นบน Web Browser")
   (princ "\\n=======================================================\\n")
   (princ)
 )
@@ -451,19 +433,28 @@ app.get('/api/rebar/plugin/autocad.lsp', (req, res) => {
   (princ)
 )
 
-;; ส่งข้อมูลชิ้นงานจาก AutoCAD ขึ้นเว็บ
-(defun c:REBAR_SYNC (/ member bar cut qty url http payload res)
+;; ส่งข้อมูลชิ้นงานจาก AutoCAD ขึ้นเว็บ พร้อมระบุสถานที่นำเศษไปใช้
+(defun c:REBAR_SYNC (/ member bar cut qty usedfor http payload res url)
   (princ "\\n=== ส่งข้อมูลการตัดเหล็กเส้นจาก AutoCAD ขึ้นระบบเว็บ Real-Time ===")
   (setq member (getstring T "\\nระบุชื่อชิ้นส่วนโครงสร้าง (เช่น เสา C1 หรือ คาน B1): "))
   (if (= member "") (setq member "ชิ้นส่วนทั่วไป"))
-  (setq bar (getstring "\\nระบุขนาดเหล็ก (เช่น DB20, DB16, DB12, RB9, RB6): "))
+  (setq bar (getstring "\\nระบุขนาดเหล็ก (เช่น DB20, DB16, DB12, RB9, RB6) [DB20]: "))
   (if (= bar "") (setq bar "DB20"))
   (setq cut (getreal "\\nระบุความยาวที่ตัดใช้ (เมตร เช่น 6.0): "))
   (if (null cut) (setq cut 6.0))
-  (setq qty (getint "\\nระบุจำนวนท่อนที่ต้องการตัด (ท่อน): "))
+  (setq qty (getint "\\nระบุจำนวนท่อนที่ต้องการตัด (ท่อน) [1]: "))
   (if (null qty) (setq qty 1))
+  (setq usedfor (getstring T "\\nระบุเศษนำไปใช้ที่ไหน (เช่น นำไปเสริมคาน B2 หรือกด Enter ข้าม): "))
 
-  (setq payload (strcat "{\\"member\\":\\"" member "\\",\\"barType\\":\\"" bar "\\",\\"standardLength\\":12.0,\\"cutLength\\":" (rtos cut 2 2) ",\\"quantity\\":" (itoa qty) "}"))
+  (setq payload (strcat
+    "{\\"label\\":\\"" member
+    "\\",\\"member\\":\\"" member
+    "\\",\\"rebarType\\":\\"" bar
+    "\\",\\"barType\\":\\"" bar
+    "\\",\\"standardLength\\":12.0,\\"cutLength\\":" (rtos cut 2 2)
+    ",\\"quantity\\":" (itoa qty)
+    ",\\"usedFor\\":\\"" usedfor "\\"}"
+  ))
 
   (setq http (vlax-create-object "MSXML2.ServerXMLHTTP.6.0"))
   (if (null http) (setq http (vlax-create-object "MSXML2.XMLHTTP")))
@@ -475,36 +466,68 @@ app.get('/api/rebar/plugin/autocad.lsp', (req, res) => {
       (vl-catch-all-apply 'vlax-invoke-method (list http 'send payload))
       (setq res (vlax-get-property http 'responseText))
       (vlax-release-object http)
-      (princ (strcat "\\n[สำเร็จ!] ส่งข้อมูล " member " (" bar " ตัด " (rtos cut 2 2) "ม. x " (itoa qty) "ท่อน) ขึ้นหน้าเว็บเรียบร้อยแล้ว!"))
+      (princ (strcat "\\n[สำเร็จ!] บันทึก " member " (" bar " ตัด " (rtos cut 2 2) "ม. x " (itoa qty) "ท่อน) ขึ้นหน้าเว็บเรียบร้อยแล้ว!"))
+      (if (/= usedfor "")
+        (princ (strcat "\\n[บันทึกเศษ] ระบุเศษนำไปใช้ที่: " usedfor))
+      )
     )
     (princ "\\nไม่สามารถสร้าง COM Object สำหรับส่ง HTTP ได้")
   )
   (princ)
 )
 
-;; ดึงข้อมูลมาวาดตารางลง DWG
-(defun c:REBAR_DRAW (/ pt http url json)
-  (setq pt (getpoint "\\nคลิกตำแหน่งที่ต้องการวางตาราง Bar Bending Schedule (BBS): "))
+;; วาดตาราง BBS สวยงามลงใน Drawing
+(defun c:REBAR_DRAW (/ pt http url csvText lines rowIdx y startX colWidths line cols x cleanCol cIdx)
+  (setq pt (getpoint "\\nคลิกตำแหน่งจุดเริ่มต้นที่จะวางตาราง Bar Bending Schedule (BBS): "))
   (if pt
     (progn
-      (princ "\\nกำลังเชื่อมต่อดึงข้อมูลตารางเหล็กเส้นจากระบบ Cloud...")
+      (princ "\\nกำลังดาวน์โหลดข้อมูลตารางเหล็กเส้นจากเซิร์ฟเวอร์...")
       (setq http (vlax-create-object "MSXML2.ServerXMLHTTP.6.0"))
       (if (null http) (setq http (vlax-create-object "MSXML2.XMLHTTP")))
       (if http
         (progn
-          (setq url "${baseUrl}/api/rebar")
+          (setq url "${baseUrl}/api/rebar/export/bbs.csv")
           (vlax-invoke-method http 'open "GET" url :vlax-false)
-          (vlax-invoke-method http 'setRequestHeader "Content-Type" "application/json")
           (vl-catch-all-apply 'vlax-invoke-method (list http 'send))
-          (setq json (vlax-get-property http 'responseText))
+          (setq csvText (vlax-get-property http 'responseText))
           (vlax-release-object http)
-          (if (and json (/= json ""))
+
+          (if (and csvText (/= csvText ""))
             (progn
-              (command "_.TEXT" pt 0.35 0 "=== ตารางถอดเหล็กเสริม (Bar Bending Schedule - BBS) ===")
-              (command "_.TEXT" (polar pt (* 1.5 pi) 0.6) 0.22 0 "ซิงค์ Real-Time กับระบบพอร์ตโฟลิโอ: ยุทธการ คำกลอน")
-              (princ (strcat "\\n[สำเร็จ] วาดตาราง BBS ที่พิกัด " (vl-princ-to-string pt) " เรียบร้อย!"))
+              (setq startX (car pt))
+              (setq y (cadr pt))
+              (setq colWidths '(1.2 3.8 2.2 2.2 2.0 1.8 2.2 2.2 2.2 2.2 2.4 2.2 4.0))
+
+              ;; Title Header
+              (command "_.TEXT" (list startX (+ y 1.2) 0.0) 0.5 0 "ตารางถอดเหล็กเสริมโครงสร้าง (BAR BENDING SCHEDULE - BBS)")
+              (command "_.TEXT" (list startX (+ y 0.5) 0.0) 0.28 0 "ผู้ออกแบบ & ควบคุมงาน: ยุทธการ คำกลอน (Auto-Sync Real-Time)")
+
+              ;; Parse CSV lines
+              (setq lines (vl-string-split "\\n" csvText))
+              (setq rowIdx 0)
+              (foreach line lines
+                (if (/= (vl-string-trim " \\r\\t" line) "")
+                  (progn
+                    (setq cols (vl-string-split "," line))
+                    (setq x startX)
+                    (setq cIdx 0)
+                    (foreach col cols
+                      (setq cleanCol (vl-string-trim " \\\"\\r" col))
+                      (command "_.TEXT" (list (+ x 0.15) (- y (* rowIdx 0.7) 0.45) 0.0) (if (= rowIdx 0) 0.28 0.22) 0 cleanCol)
+                      (setq x (+ x (nth (min cIdx (1- (length colWidths))) colWidths)))
+                      (setq cIdx (1+ cIdx))
+                    )
+                    ;; Draw horizontal line below row
+                    (command "_.LINE" (list startX (- y (* rowIdx 0.7) 0.65) 0.0) (list x (- y (* rowIdx 0.7) 0.65) 0.0) "")
+                    (setq rowIdx (1+ rowIdx))
+                  )
+                )
+              )
+              ;; Draw top horizontal line
+              (command "_.LINE" (list startX y 0.0) (list x y 0.0) "")
+              (princ (strcat "\\n[สำเร็จ] สร้างตาราง Bar Bending Schedule จำนวน " (itoa rowIdx) " แถว ลงใน Drawing เรียบร้อย!"))
             )
-            (princ "\\nไม่สามารถดึงข้อมูลได้ กรุณาตรวจสอบอินเทอร์เน็ตหรือเซิร์ฟเวอร์")
+            (princ "\\nไม่สามารถดึงข้อมูลตารางเหล็กได้ กรุณาตรวจสอบอินเทอร์เน็ตหรือเซิร์ฟเวอร์")
           )
         )
       )
@@ -571,59 +594,41 @@ module YutthakanRebarSync
         origin_x = 0
 
         items.each do |item|
-          bar_type = item['barType'] || 'DB20'
+          bar_type = item['barType'] || item['rebarType'] || 'DB20'
           diameter_mm = bar_type.gsub(/\\D/, '').to_f
           diameter_mm = 20.0 if diameter_mm == 0
           radius = (diameter_mm / 2.0).mm
 
           cut_length = (item['cutLength'] || 6.0).to_f.m
           offcut_length = (item['offcutPerBar'] || 0.0).to_f.m
+          qty = (item['quantity'] || 1).to_i
 
-          group = model.active_entities.add_group
-          group.name = "#{item['member']} - #{bar_type} (ตัด #{item['cutLength']}ม.)"
-
-          # วาดท่อนตัดใช้งาน (สีเขียว Emerald)
-          circle = group.entities.add_circle([origin_x, 0, 0], [0, 1, 0], radius, 16)
-          face = group.entities.add_face(circle)
-          face.pushpull(-cut_length)
-
-          mat_cut = model.materials["Rebar_Cut"] || model.materials.add("Rebar_Cut")
-          mat_cut.color = Sketchup::Color.new(16, 185, 129)
-          group.material = mat_cut
-
-          # วาดเศษเหล็กที่เหลือต่อท้าย (สีส้ม Amber) ถ้ามี
-          if offcut_length > 0
-            off_group = model.active_entities.add_group
-            off_group.name = "เศษเหลือ #{bar_type} (#{item['offcutPerBar']}ม.)"
-            off_circle = off_group.entities.add_circle([origin_x, cut_length + 0.1.m, 0], [0, 1, 0], radius, 16)
-            off_face = off_group.entities.add_face(off_circle)
-            off_face.pushpull(-offcut_length)
-
-            mat_off = model.materials["Rebar_Offcut"] || model.materials.add("Rebar_Offcut")
-            mat_off.color = Sketchup::Color.new(245, 158, 11)
-            off_group.material = mat_off
+          qty.times do |q_idx|
+            center_point = Geom::Point3d.new(origin_x.m, (q_idx * 0.25).m, 0)
+            circle = model.entities.add_circle(center_point, Geom::Vector3d.new(0, 0, 1), radius)
+            face = model.entities.add_face(circle)
+            face.pushpull(cut_length) if face
           end
-
-          origin_x += 0.5.m
+          origin_x += 0.5
         end
 
-        UI.messagebox("สร้างโมเดล 3D เหล็กเส้นสำเร็จจำนวน #{items.length} รายการ!")
+        model.commit_operation
+        UI.messagebox("สร้างโมเดล 3D เหล็กเส้นตามตาราง BBS สำเร็จเรียบร้อย!")
       else
-        UI.messagebox("ไม่สามารถดึงข้อมูลจากเซิร์ฟเวอร์ได้")
+        UI.messagebox("ไม่สามารถดึงข้อมูลจาก Server ได้")
       end
     rescue => e
       UI.messagebox("เกิดข้อผิดพลาด: #{e.message}")
     end
-
-    model.commit_operation
   end
+end
 
-  unless file_loaded?(__FILE__)
-    menu = UI.menu('Plugins').add_submenu('ระบบถอดเหล็กเส้น (ยุทธการ)')
-    menu.add_item('เปิดหน้าต่าง Live Sync (HtmlDialog)') { open_live_dialog }
-    menu.add_item('สร้างโมเดล 3D เหล็กเส้นจริงใน SketchUp') { draw_3d_rebars }
-    file_loaded(__FILE__)
-  end
+if !defined?(@yutthakan_menu_loaded)
+  plugins_menu = UI.menu("Plugins")
+  rebar_menu = plugins_menu.add_submenu("ถอดเหล็กเส้น (BBS)")
+  rebar_menu.add_item("เปิดหน้าต่าง Live Sync Web") { YutthakanRebarSync.open_live_dialog }
+  rebar_menu.add_item("สร้างโมเดล 3D เหล็กเส้นจริง") { YutthakanRebarSync.draw_3d_rebars }
+  @yutthakan_menu_loaded = true
 end
 `;
 
@@ -636,9 +641,24 @@ end
 app.get('/api/rebar/export/bbs.csv', async (req, res) => {
   try {
     const items = await DataService.getRebarItems();
-    let csv = 'ลำดับ,ชิ้นส่วนโครงสร้าง,ขนาดเหล็ก,ความยาวมาตรฐาน (ม.),ความยาวตัด (ม.),จำนวน (ท่อน),ได้ท่อน/เส้น,สั่งเส้นเต็ม (เส้น),เศษเหลือ/เส้น (ม.),รวมความยาวตัด (ม.),รวมเศษเหลือ (ม.),น้ำหนักต่อเมตร (กก./ม.),น้ำหนักรวม (กก.),% เศษสูญเสีย,หมายเหตุ\n';
+    let csv = 'ลำดับ,ชิ้นส่วนโครงสร้าง,ขนาดเหล็ก,ความยาวมาตรฐาน (ม.),ความยาวตัด (ม.),จำนวน (ท่อน),ได้ท่อน/เส้น,สั่งเส้นเต็ม (เส้น),เศษเหลือ/เส้น (ม.),รวมความยาวตัด (ม.),รวมเศษเหลือ (ม.),น้ำหนักต่อเมตร (กก./ม.),น้ำหนักรวม (กก.),% เศษสูญเสีย,เศษนำไปใช้ที่ไหน\n';
     items.forEach((it, idx) => {
-      csv += `${idx + 1},"${it.member}","${it.barType}",${it.standardLength},${it.cutLength},${it.quantity},${it.piecesPerStandardBar},${it.barsNeeded},${it.offcutPerBar},${it.totalCutLength},${it.totalOffcutLength},${it.weightPerMeter},${it.weightKg},${it.wastePercent}%,"${it.notes || ''}"\n`;
+      const label = it.label || it.member || '-';
+      const type = it.rebarType || it.barType || 'DB20';
+      const stdLen = it.standardLength || 12;
+      const cutLen = it.cutLength || 0;
+      const qty = it.quantity || 1;
+      const pieces = it.piecesPerBar || it.piecesPerStandardBar || 1;
+      const bars = it.standardBarsNeeded !== undefined ? it.standardBarsNeeded : (it.barsNeeded || 0);
+      const offcut = it.offcutPerBar || 0;
+      const totalCut = it.totalCutLength || 0;
+      const totalOffcut = it.totalScrapLength !== undefined ? it.totalScrapLength : (it.totalOffcutLength || 0);
+      const unitW = it.unitWeight || it.weightPerMeter || 2.47;
+      const totalW = it.totalWeightKg !== undefined ? it.totalWeightKg : (it.weightKg || 0);
+      const waste = it.scrapPercent !== undefined ? it.scrapPercent : (it.wastePercent || 0);
+      const usedFor = it.usedFor || it.note || '';
+
+      csv += `${idx + 1},"${label}","${type}",${stdLen},${cutLen},${qty},${pieces},${bars},${offcut},${totalCut},${totalOffcut},${unitW},${totalW},${waste}%,"${usedFor}"\n`;
     });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="rebar_bbs_${Date.now()}.csv"`);
@@ -649,7 +669,7 @@ app.get('/api/rebar/export/bbs.csv', async (req, res) => {
 });
 
 // System Status & Backup
-app.get('/api/status', requireAdmin, async (req, res) => {
+app.get('/api/status', async (req, res) => {
   try {
     const status = await DataService.getDBStatus();
     res.json(status);
@@ -665,6 +685,8 @@ app.get('/api/backup', requireAdmin, async (req, res) => {
     const messages = await DataService.getMessages();
     const siteLogs = await DataService.getSiteLogs(true);
     const vaultItems = await DataService.getVaultItems();
+    const rebarItems = await DataService.getRebarItems();
+    const rebarOffcuts = await DataService.getRebarOffcuts();
     const backupData = {
       exportDate: new Date().toISOString(),
       appName: 'Yutthakan Portfolio & Architectural Management',
@@ -672,7 +694,9 @@ app.get('/api/backup', requireAdmin, async (req, res) => {
       projects,
       messages,
       siteLogs,
-      vaultItems
+      vaultItems,
+      rebarItems,
+      rebarOffcuts
     };
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename=portfolio_backup_${Date.now()}.json`);

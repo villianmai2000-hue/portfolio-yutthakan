@@ -46,13 +46,13 @@ export default function App() {
   const loadData = async () => {
     try {
       const [prof, projs, cats, logs, msgs] = await Promise.all([
-        api.getProfile(),
-        api.getProjects(),
+        api.getProfile().catch(() => null),
+        api.getProjects().catch(() => []),
         api.getCategories().catch(() => []),
         api.getSiteLogs().catch(() => []),
         api.getMessages().catch(() => [])
       ]);
-      setProfile(prof);
+      if (prof) setProfile(prof);
       setProjects(projs);
       setCategories(cats.length ? cats : (prof?.categories || []));
       setSiteLogs(logs);
@@ -133,9 +133,11 @@ export default function App() {
 
       {/* Main Content Sections */}
       <main className="flex-1">
-        {/* Profile & Cover Hero */}
+        {/* Profile & Cover Hero with Owner Fast Edit */}
         <HeroProfile
           profile={profile}
+          currentUser={currentUser}
+          onProfileUpdated={(updated) => setProfile(updated)}
           onScrollToContact={handleScrollToContact}
           onScrollToPortfolio={handleScrollToPortfolio}
           onScrollToSiteLogs={handleScrollToSiteLogs}

@@ -45,6 +45,7 @@ export const api = {
 
   // Categories
   getCategories: () => request('/categories'),
+  createCategory: (name) => request('/categories', { method: 'POST', body: JSON.stringify({ category: name }) }),
   addCategory: (category) => request('/categories', { method: 'POST', body: JSON.stringify({ category }) }),
   deleteCategory: (name) => request(`/categories/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 
@@ -72,9 +73,16 @@ export const api = {
   getSketchUpPluginUrl: () => `${BASE_URL}/rebar/plugin/sketchup.rb`,
   getRebarCsvUrl: () => `${BASE_URL}/rebar/export/bbs.csv`,
 
+  // Rebar Offcut Inventory & Reuse Management
+  getRebarOffcuts: () => request('/rebar/offcuts'),
+  updateRebarOffcut: (id, data) => request(`/rebar/offcuts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  markOffcutUsed: (id, usedFor) => request(`/rebar/offcuts/${id}/use`, { method: 'POST', body: JSON.stringify({ usedFor }) }),
+  deleteRebarOffcut: (id) => request(`/rebar/offcuts/${id}`, { method: 'DELETE' }),
+
   // Private Vault (PIN Lock)
   verifyVaultPin: (pin) => request('/vault/verify-pin', { method: 'POST', body: JSON.stringify({ pin }) }),
   setVaultPin: (newPin) => request('/vault/set-pin', { method: 'POST', body: JSON.stringify({ newPin }) }),
+  changeVaultPin: (newPin) => request('/vault/set-pin', { method: 'POST', body: JSON.stringify({ newPin }) }),
   getVaultItems: () => request('/vault/items'),
   addVaultItem: (item) => request('/vault/items', { method: 'POST', body: JSON.stringify(item) }),
   deleteVaultItem: (id) => request(`/vault/items/${id}`, { method: 'DELETE' }),
@@ -86,6 +94,7 @@ export const api = {
   deleteSiteLog: (id) => request(`/site-logs/${id}`, { method: 'DELETE' }),
   submitSiteFeedback: (id, feedback) => request(`/site-logs/${id}/feedback`, { method: 'POST', body: JSON.stringify(feedback) }),
   acknowledgeSiteLog: (id, statusData) => request(`/site-logs/${id}/acknowledge`, { method: 'PUT', body: JSON.stringify(statusData) }),
+  respondFeedback: (id, feedbackIndex, responseData) => request(`/site-logs/${id}/feedback/${feedbackIndex}/respond`, { method: 'PUT', body: JSON.stringify(responseData) }),
 
   // File Upload (Admin & Public)
   uploadFile: (data) => request('/upload', { method: 'POST', body: JSON.stringify(data) }),
@@ -93,5 +102,6 @@ export const api = {
 
   // System Status & Backup
   getStatus: () => request('/status'),
+  getSystemStatus: () => request('/status'),
   getBackupUrl: () => `${BASE_URL}/backup`
 };

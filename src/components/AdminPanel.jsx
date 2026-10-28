@@ -7,10 +7,11 @@ import {
   Lock, KeyRound, Copy, Eye, EyeOff, ShieldCheck, MapPin, 
   Navigation, Calendar, Clock, Ruler, ClipboardList, CheckCheck,
   Tag, Settings as SettingsIcon, ShieldAlert, FolderPlus, Bell,
-  FileSpreadsheet, PhoneCall, ZoomIn, Boxes, Wrench, Send
+  FileSpreadsheet, PhoneCall, ZoomIn, Boxes, Wrench, Send,
+  Recycle, CheckSquare, History, Archive
 } from 'lucide-react';
 import { api } from '../utils/api.js';
-import { compressImage, compressUltraCompact, formatBytes } from '../utils/compressor.js';
+import { compressUltraCompact, formatBytes } from '../utils/compressor.js';
 
 const REBAR_WEIGHTS = {
   DB12: 0.888,
@@ -26,6 +27,10 @@ const REBAR_WEIGHTS = {
 export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab = 'projects' }) {
   const [activeTab, setActiveTab] = useState(initialTab || 'projects'); 
   // Tabs: 'projects', 'categories', 'rebar', 'sitelogs', 'vault', 'messages', 'settings', 'system'
+
+  // Sub-tab inside Rebar: 'bbs' or 'offcuts'
+  const [rebarSubTab, setRebarSubTab] = useState('bbs'); 
+  const [offcutFilter, setOffcutFilter] = useState('available'); // 'available' or 'used'
 
   useEffect(() => {
     if (initialTab) {
@@ -43,17 +48,9 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
-  // Project Editor State
-  const [editingProject, setEditingProject] = useState(null);
-  const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const [compressing, setCompressing] = useState(false);
-  const [compressionStats, setCompressionStats] = useState(null);
-
-  // Category Editor State
-  const [newCategoryName, setNewCategoryName] = useState('');
-
-  // Rebar Cut List (BBS) State - Requirement 5 & 8
+  // Rebar Cut List & Offcut Inventory State (Requirements 4, 5, 7, 8, 9)
   const [rebarItems, setRebarItems] = useState([]);
+  const [rebarOffcuts, setRebarOffcuts] = useState([]);
   const [rebarSummary, setRebarSummary] = useState(null);
   const [rebarLoading, setRebarLoading] = useState(false);
   const [rebarAutoSync, setRebarAutoSync] = useState(true);
@@ -65,14 +62,25 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
     standardLength: 12,
     cutLength: 6.0,
     quantity: 1,
-    note: ''
+    usedFor: '',
+    note: '',
+    isReusedOffcut: false,
+    reusedOffcutId: ''
   });
 
-  // Message Detail & Lightbox State - Requirement 1
+  // Project Editor State
+  const [editingProject, setEditingProject] = useState(null);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [compressing, setCompressing] = useState(false);
+
+  // Category Editor State
+  const [newCategoryName, setNewCategoryName] = useState('');
+
+  // Message Detail & Lightbox State
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [zoomPhotoUrl, setZoomPhotoUrl] = useState(null);
 
-  // Private Vault State (Requirement 10)
+  // Private Vault State (PIN: 0966390496)
   const [vaultUnlocked, setVaultUnlocked] = useState(false);
   const [vaultPinInput, setVaultPinInput] = useState('');
   const [vaultPinError, setVaultPinError] = useState('');
@@ -82,7 +90,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
   const [newPinValue, setNewPinValue] = useState('');
   const [copyFeedback, setCopyFeedback] = useState(null);
 
-  // Site Log Editor State (Requirement 11 & 12)
+  // Site Log Editor State
   const [editingSiteLog, setEditingSiteLog] = useState(null);
   const [isSiteLogEditorOpen, setIsSiteLogEditorOpen] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
@@ -107,18 +115,18 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
     setLoading(true);
     try {
       const [projs, prof, msgs, cats, logs, sys] = await Promise.all([
-        api.getProjects(),
-        api.getProfile(),
+        api.getProjects().catch(() => []),
+        api.getProfile().catch(() => null),
         api.getMessages().catch(() => []),
         api.getCategories().catch(() => []),
-        api.getSiteLogs().catch(() => []),
+        api.getSiteLogs(true).catch(() => []),
         api.getSystemStatus().catch(() => null)
       ]);
-      setProjects(projs);
-      setProfile(prof);
-      setMessages(msgs);
-      setCategories(cats);
-      setSiteLogs(logs);
+      setProjects(projs || []);
+      if (prof) setProfile(prof);
+      setMessages(msgs || []);
+      setCategories(cats || []);
+      setSiteLogs(logs || []);
       setSystemStatus(sys);
       loadRebarData(false);
     } catch (err) {
@@ -131,11 +139,13 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
   const loadRebarData = async (showSpinner = true) => {
     if (showSpinner) setRebarLoading(true);
     try {
-      const [items, summary] = await Promise.all([
+      const [items, offcuts, summary] = await Promise.all([
         api.getRebarItems().catch(() => []),
+        api.getRebarOffcuts().catch(() => []),
         api.getRebarSummary().catch(() => null)
       ]);
-      setRebarItems(items);
+      setRebarItems(items || []);
+      setRebarOffcuts(offcuts || []);
       setRebarSummary(summary);
     } catch (err) {
       console.error('Failed to load rebar:', err);
@@ -150,20 +160,43 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
   };
 
   // ========================================================
-  // REBAR BBS & REAL-TIME CAD / SKETCHUP HANDLERS
+  // REBAR & OFFCUT HANDLERS (Requirements 4, 5, 7, 8, 9)
   // ========================================================
-  const calculateRebarMetrics = (stdLen, cutLen, qty, type) => {
+  const calculateRebarMetrics = (stdLen, cutLen, qty, type, isReused, offcutInitialLen) => {
     const sLen = Number(stdLen) || 12;
     const cLen = Number(cutLen) || 1;
     const count = Number(qty) || 1;
+    const unitWeight = REBAR_WEIGHTS[type] || 2.47;
+    const totalCutLength = Number((cLen * count).toFixed(2));
+
+    if (isReused) {
+      const initial = Number(offcutInitialLen) || cLen;
+      const rem = Math.max(0, initial - totalCutLength);
+      return {
+        piecesPerBar: 1,
+        standardBarsNeeded: 0,
+        offcutPerBar: Number(rem.toFixed(2)),
+        totalCutLength,
+        totalStandardLength: initial,
+        totalScrapLength: Number(rem.toFixed(2)),
+        scrapPercent: initial > 0 ? Number(((rem / initial) * 100).toFixed(1)) : 0,
+        unitWeight,
+        totalWeightKg: Number((totalCutLength * unitWeight).toFixed(2)),
+        totalBarWeightKg: Number((initial * unitWeight).toFixed(2))
+      };
+    }
+
     const piecesPerBar = Math.max(1, Math.floor(sLen / cLen));
     const standardBarsNeeded = Math.ceil(count / piecesPerBar);
-    const offcutPerBar = Math.max(0, sLen - (piecesPerBar * cLen));
-    const totalCutLength = count * cLen;
     const totalStandardLength = standardBarsNeeded * sLen;
     const totalScrapLength = Math.max(0, totalStandardLength - totalCutLength);
     const scrapPercent = totalStandardLength > 0 ? ((totalScrapLength / totalStandardLength) * 100) : 0;
-    const unitWeight = REBAR_WEIGHTS[type] || 2.47;
+    
+    // Accurate offcut per bar calculation:
+    const offcutPerBar = (standardBarsNeeded === 1) 
+      ? totalScrapLength 
+      : Number((totalScrapLength / standardBarsNeeded).toFixed(2));
+
     const totalWeightKg = totalCutLength * unitWeight;
     const totalBarWeightKg = totalStandardLength * unitWeight;
 
@@ -193,11 +226,21 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
         showFeedback('success', 'แก้ไขรายการเหล็กเรียบร้อย และซิงก์ CAD/SketchUp สำเร็จ');
       } else {
         await api.createRebarItem(rebarForm);
-        showFeedback('success', 'เพิ่มรายการเหล็กเรียบร้อย และซิงก์ CAD/SketchUp สำเร็จ');
+        showFeedback('success', 'เพิ่มรายการเหล็กเรียบร้อย และระบบบันทึกเศษลงคลังอัตโนมัติ');
       }
       setIsRebarEditorOpen(false);
       setEditingRebarItem(null);
-      setRebarForm({ label: '', rebarType: 'DB20', standardLength: 12, cutLength: 6.0, quantity: 1, note: '' });
+      setRebarForm({
+        label: '',
+        rebarType: 'DB20',
+        standardLength: 12,
+        cutLength: 6.0,
+        quantity: 1,
+        usedFor: '',
+        note: '',
+        isReusedOffcut: false,
+        reusedOffcutId: ''
+      });
       loadRebarData();
     } catch (err) {
       showFeedback('error', 'บันทึกรายการเหล็กไม่สำเร็จ: ' + err.message);
@@ -215,50 +258,61 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
     }
   };
 
-  // ========================================================
-  // MESSAGE HANDLERS (Delete & View Details)
-  // ========================================================
-  const handleToggleMessage = async (id, currentStatus) => {
-    const nextStatus = currentStatus === 'unread' ? 'read' : 'unread';
+  // Offcut destination note update
+  const handleUpdateOffcutNote = async (id, usedForText) => {
     try {
-      await api.updateMessageStatus(id, nextStatus);
-      setMessages(messages.map(m => m.id === id ? { ...m, status: nextStatus } : m));
-      if (selectedMessage && selectedMessage.id === id) {
-        setSelectedMessage({ ...selectedMessage, status: nextStatus });
-      }
-      showFeedback('success', 'อัปเดตสถานะข้อความแล้ว');
+      await api.updateRebarOffcut(id, { usedFor: usedForText });
+      showFeedback('success', 'บันทึกสถานที่นำเศษไปใช้เรียบร้อย');
+      loadRebarData(false);
+    } catch (err) {
+      showFeedback('error', 'บันทึกไม่สำเร็จ: ' + err.message);
+    }
+  };
+
+  // Mark offcut as used (cuts it out of available inventory - Requirement 9)
+  const handleMarkOffcutUsed = async (offcut) => {
+    const dest = window.prompt(
+      `คุณต้องการนำเศษเหล็ก ${offcut.rebarType || offcut.barType} ยาว ${offcut.length} ม. ไปใช้ที่ไหน?`,
+      offcut.usedFor || 'นำไปเสริมโครงสร้าง'
+    );
+    if (dest === null) return;
+    try {
+      await api.markOffcutUsed(offcut.id, dest);
+      showFeedback('success', 'ตัดยอดเศษเหล็กออกจากคลังคงเหลือเรียบร้อย!');
+      loadRebarData(false);
     } catch (err) {
       showFeedback('error', 'อัปเดตไม่สำเร็จ: ' + err.message);
     }
   };
 
-  const handleDeleteMessage = async (id) => {
-    if (!window.confirm('คุณต้องการลบข้อความจ้างงานนี้ใช่หรือไม่? ข้อมูลจะถูกลบถาวร')) return;
+  // Restore offcut back to available
+  const handleRestoreOffcut = async (id) => {
     try {
-      await api.deleteMessage(id);
-      setMessages(messages.filter(m => m.id !== id));
-      if (selectedMessage && selectedMessage.id === id) {
-        setSelectedMessage(null);
-      }
-      showFeedback('success', 'ลบข้อความจ้างงานเรียบร้อยแล้ว');
+      await api.updateRebarOffcut(id, { status: 'available', usedAt: null });
+      showFeedback('success', 'กู้คืนเศษเหล็กกลับเข้าคลังคงเหลือแล้ว');
+      loadRebarData(false);
     } catch (err) {
-      showFeedback('error', 'ลบข้อความไม่สำเร็จ: ' + err.message);
+      showFeedback('error', 'กู้คืนไม่สำเร็จ: ' + err.message);
     }
   };
 
   // ========================================================
-  // VAULT HANDLERS
+  // VAULT HANDLERS (PIN Lock: 0966390496)
   // ========================================================
   const handleUnlockVault = async (e) => {
     e.preventDefault();
     setVaultPinError('');
     try {
       const res = await api.verifyVaultPin(vaultPinInput);
+      if (!res.success) {
+        setVaultPinError('รหัส PIN ไม่ถูกต้อง (กรุณากรอกรหัส 0966390496)');
+        return;
+      }
       setVaultItems(res.items || []);
       setVaultUnlocked(true);
       setVaultPinInput('');
     } catch (err) {
-      setVaultPinError(err.message || 'รหัส PIN ไม่ถูกต้อง');
+      setVaultPinError('รหัส PIN ไม่ถูกต้อง (กรุณากรอกรหัส 0966390496)');
     }
   };
 
@@ -309,7 +363,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
   };
 
   // ========================================================
-  // SITE LOG HANDLERS
+  // SITE LOG HANDLERS (Fix Image Display & Upload)
   // ========================================================
   const handleGetCurrentGPS = () => {
     if (!navigator.geolocation) {
@@ -350,7 +404,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
       }
       setIsSiteLogEditorOpen(false);
       setEditingSiteLog(null);
-      const updated = await api.getSiteLogs();
+      const updated = await api.getSiteLogs(true);
       setSiteLogs(updated);
       onRefreshData();
     } catch (err) {
@@ -363,7 +417,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
     try {
       await api.deleteSiteLog(id);
       showFeedback('success', 'ลบบันทึกตรวจงานแล้ว');
-      const updated = await api.getSiteLogs();
+      const updated = await api.getSiteLogs(true);
       setSiteLogs(updated);
       onRefreshData();
     } catch (err) {
@@ -379,7 +433,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
         targetDate: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]
       });
       showFeedback('success', 'อัปเดตการรับเรื่องและสถานะเรียบร้อย');
-      const updated = await api.getSiteLogs();
+      const updated = await api.getSiteLogs(true);
       setSiteLogs(updated);
       onRefreshData();
     } catch (err) {
@@ -387,74 +441,16 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
     }
   };
 
-  // ========================================================
-  // PROJECT HANDLERS
-  // ========================================================
-  const handleSaveProject = async (e) => {
-    e.preventDefault();
-    try {
-      if (editingProject.id) {
-        await api.updateProject(editingProject.id, editingProject);
-        showFeedback('success', 'แก้ไขผลงานเรียบร้อยแล้ว');
-      } else {
-        await api.createProject(editingProject);
-        showFeedback('success', 'เพิ่มผลงานใหม่เรียบร้อยแล้ว');
-      }
-      setIsEditorOpen(false);
-      setEditingProject(null);
-      setCompressionStats(null);
-      const updated = await api.getProjects();
-      setProjects(updated);
-      onRefreshData();
-    } catch (err) {
-      showFeedback('error', 'บันทึกไม่สำเร็จ: ' + err.message);
-    }
-  };
-
-  const handleDeleteProject = async (id) => {
-    if (!window.confirm('คุณแน่ใจหรือไม่ว่าต้องการลบผลงานนี้?')) return;
-    try {
-      await api.deleteProject(id);
-      showFeedback('success', 'ลบผลงานเรียบร้อยแล้ว');
-      const updated = await api.getProjects();
-      setProjects(updated);
-      onRefreshData();
-    } catch (err) {
-      showFeedback('error', 'ลบผลงานไม่สำเร็จ: ' + err.message);
-    }
+  // Helper to ensure image src is always a valid string
+  const getImgSrc = (img) => {
+    if (!img) return '';
+    if (typeof img === 'string') return img;
+    if (typeof img === 'object' && img.dataUrl) return img.dataUrl;
+    return '';
   };
 
   // ========================================================
-  // CATEGORIES HANDLERS
-  // ========================================================
-  const handleAddCategory = async (e) => {
-    e.preventDefault();
-    if (!newCategoryName.trim()) return;
-    try {
-      const updated = await api.createCategory(newCategoryName.trim());
-      setCategories(updated);
-      setNewCategoryName('');
-      showFeedback('success', 'เพิ่มหมวดหมู่ผลงานใหม่แล้ว');
-      onRefreshData();
-    } catch (err) {
-      showFeedback('error', 'เพิ่มหมวดหมู่ไม่สำเร็จ: ' + err.message);
-    }
-  };
-
-  const handleDeleteCategory = async (catName) => {
-    if (!window.confirm(`คุณต้องการลบหมวดหมู่ "${catName}" ใช่หรือไม่?`)) return;
-    try {
-      const updated = await api.deleteCategory(catName);
-      setCategories(updated);
-      showFeedback('success', 'ลบหมวดหมู่เรียบร้อยแล้ว');
-      onRefreshData();
-    } catch (err) {
-      showFeedback('error', 'ลบหมวดหมู่ไม่สำเร็จ: ' + err.message);
-    }
-  };
-
-  // ========================================================
-  // SETTINGS & PROFILE HANDLERS (Requirement 4)
+  // SETTINGS & PROFILE HANDLERS
   // ========================================================
   const handleSaveSettings = async (e) => {
     e.preventDefault();
@@ -473,18 +469,11 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
     if (!file) return;
     try {
       showFeedback('info', 'กำลังบีบอัดรูปภาพให้เล็กที่สุดแต่คมชัด...');
-      const compressedDataUrl = await compressUltraCompact(file, 400, 400, 0.85);
-      setProfile({ ...profile, avatar: compressedDataUrl });
+      const dataUrl = await compressUltraCompact(file, 400, 400, 0.85);
+      setProfile({ ...profile, avatar: dataUrl });
       showFeedback('success', 'บีบอัดรูปโปรไฟล์พร้อมบันทึกแล้ว');
     } catch (err) {
       showFeedback('error', 'บีบอัดรูปไม่สำเร็จ: ' + err.message);
-    }
-  };
-
-  const handleRemoveAvatar = () => {
-    if (window.confirm('คุณต้องการลบรูปโปรไฟล์ออกใช่หรือไม่?')) {
-      setProfile({ ...profile, avatar: '' });
-      showFeedback('info', 'ลบรูปโปรไฟล์แล้ว (อย่าลืมกดปุ่มบันทึก)');
     }
   };
 
@@ -493,28 +482,33 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
     if (!file) return;
     try {
       showFeedback('info', 'กำลังบีบอัดภาพปกให้เล็กที่สุดแต่คมชัด...');
-      const compressedDataUrl = await compressUltraCompact(file, 1600, 600, 0.82);
-      setProfile({ ...profile, coverImage: compressedDataUrl });
+      const dataUrl = await compressUltraCompact(file, 1600, 600, 0.82);
+      setProfile({ ...profile, cover: dataUrl, coverImage: dataUrl });
       showFeedback('success', 'บีบอัดภาพปกพร้อมบันทึกแล้ว');
     } catch (err) {
       showFeedback('error', 'บีบอัดรูปไม่สำเร็จ: ' + err.message);
     }
   };
 
-  const handleRemoveCover = () => {
-    if (window.confirm('คุณต้องการลบภาพปกออกใช่หรือไม่?')) {
-      setProfile({ ...profile, coverImage: '' });
-      showFeedback('info', 'ลบภาพปกแล้ว (อย่าลืมกดปุ่มบันทึก)');
-    }
-  };
+  // Available offcuts for reuse dropdown
+  const availableOffcutsForType = rebarOffcuts.filter(
+    o => o.status === 'available' && 
+    (o.rebarType === rebarForm.rebarType || o.barType === rebarForm.rebarType) &&
+    o.length >= (rebarForm.cutLength || 0)
+  );
 
-  const unreadMessagesCount = messages.filter(m => m.status === 'unread').length;
+  const selectedOffcut = rebarOffcuts.find(o => o.id === rebarForm.reusedOffcutId);
   const currentCalc = calculateRebarMetrics(
     rebarForm.standardLength,
     rebarForm.cutLength,
     rebarForm.quantity,
-    rebarForm.rebarType
+    rebarForm.rebarType,
+    rebarForm.isReusedOffcut,
+    selectedOffcut?.length
   );
+
+  const filteredOffcuts = rebarOffcuts.filter(o => offcutFilter === 'all' || o.status === offcutFilter);
+  const unreadMessagesCount = messages.filter(m => m.status === 'unread').length;
 
   if (!isOpen) return null;
 
@@ -536,7 +530,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                 </span>
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                จัดการผลงาน หมวดหมู่ ถอดเหล็กเส้น ตรวจหน้างาน และข้อความจ้างงาน
+                จัดการผลงาน ถอดเหล็กเส้น คลังเศษเหล็ก ตรวจหน้างาน และข้อความจ้างงาน
               </p>
             </div>
           </div>
@@ -585,7 +579,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
             <Tag className="w-4 h-4" /> หมวดหมู่ ({categories.length})
           </button>
 
-          {/* Tab: Rebar Cut List & CAD/SketchUp Sync */}
+          {/* Rebar & Offcuts Main Tab */}
           <button
             onClick={() => setActiveTab('rebar')}
             className={`px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap transition-colors ${
@@ -594,7 +588,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                 : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold text-emerald-600 dark:text-emerald-400'
             }`}
           >
-            <Boxes className="w-4 h-4 text-amber-500" /> ถอดเหล็กเส้น & Sync CAD/SketchUp ({rebarItems.length})
+            <Boxes className="w-4 h-4 text-amber-500" /> ถอดเหล็กเส้น & คลังเศษ ({rebarItems.length})
           </button>
 
           <button
@@ -616,7 +610,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                 : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
-            <Lock className="w-4 h-4" /> อีเมล & บัญชีส่วนตัว (PIN)
+            <Lock className="w-4 h-4" /> ข้อมูลส่วนตัว (PIN)
           </button>
 
           <button
@@ -654,7 +648,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                 : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
-            <Database className="w-4 h-4" /> สถานะระบบ & MongoDB
+            <Database className="w-4 h-4" /> สถานะระบบ & Database
           </button>
         </div>
 
@@ -662,7 +656,477 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
 
           {/* ========================================================
-              TAB 1: PROJECTS
+              TAB: REBAR CUT LIST & OFFCUT INVENTORY
+             ======================================================== */}
+          {activeTab === 'rebar' && (
+            <div className="space-y-6">
+              
+              {/* Header & Sub-Tab Switcher */}
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Boxes className="w-5 h-5 text-emerald-500" />
+                    <span>งานถอดเหล็กเส้น (BBS) & ระบบคลังเศษเหล็กนำกลับมาใช้</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    คำนวณเส้นเต็ม เศษเหลือ นำเศษกลับมาใช้ ระบุปลายทาง และซิงก์ AutoCAD/SketchUp สองทิศทาง
+                  </p>
+                </div>
+                
+                {/* Sub-tab Pill Switcher */}
+                <div className="flex items-center gap-1.5 p-1 bg-slate-200 dark:bg-slate-800 rounded-2xl">
+                  <button
+                    onClick={() => setRebarSubTab('bbs')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      rebarSubTab === 'bbs'
+                        ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    1. ตารางตัดเหล็กเส้น (BBS)
+                  </button>
+                  <button
+                    onClick={() => setRebarSubTab('offcuts')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
+                      rebarSubTab === 'offcuts'
+                        ? 'bg-emerald-600 text-white shadow'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    <Recycle className="w-3.5 h-3.5" />
+                    <span>2. คลังเศษเหล็กสะสม ({rebarOffcuts.filter(o => o.status === 'available').length})</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Sub-Tab 1: BBS Cut List */}
+              {rebarSubTab === 'bbs' && (
+                <div className="space-y-6">
+                  {/* Summary Metric Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                    <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[11px] font-semibold text-slate-500">เหล็กมาตรฐานที่ต้องสั่ง</div>
+                      <div className="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+                        {rebarSummary?.totalStandardBars || rebarSummary?.barsNeeded || 0} <span className="text-xs font-normal text-slate-500">เส้น</span>
+                      </div>
+                    </div>
+                    <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[11px] font-semibold text-slate-500">ความยาวตัดใช้จริง</div>
+                      <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+                        {rebarSummary?.totalCutLength || rebarSummary?.totalCutMeters || 0} <span className="text-xs font-normal text-slate-500">ม.</span>
+                      </div>
+                    </div>
+                    <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[11px] font-semibold text-slate-500">เศษเหล็กคงเหลือรวม</div>
+                      <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">
+                        {rebarSummary?.totalScrapLength || rebarSummary?.totalOffcutMeters || 0} <span className="text-xs font-normal text-slate-500">ม.</span>
+                      </div>
+                    </div>
+                    <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[11px] font-semibold text-slate-500">เปอร์เซ็นต์เศษสูญเปล่า</div>
+                      <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">
+                        {rebarSummary?.averageScrapPercent || rebarSummary?.averageWastePercent || 0}%
+                      </div>
+                    </div>
+                    <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm col-span-2 sm:col-span-1">
+                      <div className="text-[11px] font-semibold text-slate-500">น้ำหนักเหล็กตัดใช้</div>
+                      <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mt-1">
+                        {rebarSummary?.totalWeightTons || (rebarSummary?.totalWeightKg ? (rebarSummary.totalWeightKg / 1000).toFixed(2) : 0)} <span className="text-xs font-normal text-slate-500">ตัน</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions & Integration Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setEditingRebarItem(null);
+                          setRebarForm({
+                            label: '',
+                            rebarType: 'DB20',
+                            standardLength: 12,
+                            cutLength: 6.0,
+                            quantity: 1,
+                            usedFor: '',
+                            note: '',
+                            isReusedOffcut: false,
+                            reusedOffcutId: ''
+                          });
+                          setIsRebarEditorOpen(true);
+                        }}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-600/20"
+                      >
+                        <Plus className="w-4 h-4" /> เพิ่มรายการถอดเหล็ก (BBS)
+                      </button>
+                      <button
+                        onClick={() => loadRebarData(true)}
+                        className="px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${rebarLoading ? 'animate-spin' : ''}`} /> ซิงก์ทันที
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <a
+                        href={api.getAutoCADPluginUrl()}
+                        download="rebar_sync.lsp"
+                        className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow"
+                      >
+                        <Download className="w-3.5 h-3.5" /> โหลดปลั๊กอิน AutoCAD (.lsp)
+                      </a>
+                      <a
+                        href={api.getSketchUpPluginUrl()}
+                        download="rebar_live_sync.rb"
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow"
+                      >
+                        <Download className="w-3.5 h-3.5" /> โหลดปลั๊กอิน SketchUp (.rb)
+                      </a>
+                      <a
+                        href={api.getRebarCsvUrl()}
+                        download="rebar_bbs.csv"
+                        className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5" /> Export Excel/CSV
+                      </a>
+                    </div>
+                  </div>
+
+                  {/* BBS Table */}
+                  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                    <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                      <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500">
+                        ตารางถอดเหล็กเส้นและคำนวณเศษคงเหลือ ({rebarItems.length} รายการ)
+                      </h4>
+                      <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={rebarAutoSync}
+                          onChange={(e) => setRebarAutoSync(e.target.checked)}
+                          className="rounded text-emerald-600 w-3.5 h-3.5"
+                        />
+                        <span>Auto-Sync 5s</span>
+                      </label>
+                    </div>
+
+                    {rebarItems.length === 0 ? (
+                      <div className="p-12 text-center text-slate-400 text-xs">
+                        ยังไม่มีรายการถอดเหล็กเส้น กดปุ่ม "เพิ่มรายการถอดเหล็ก (BBS)" ด้านบน
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200 dark:border-slate-800">
+                            <tr>
+                              <th className="p-3">หมวด / ตำแหน่ง</th>
+                              <th className="p-3">ชนิดเหล็ก</th>
+                              <th className="p-3">สเปกความยาว</th>
+                              <th className="p-3 text-right">ตัดใช้ (ม.)</th>
+                              <th className="p-3 text-right">จำนวนชิ้น</th>
+                              <th className="p-3 text-right font-bold text-emerald-600 dark:text-emerald-400">เส้นเต็มที่ใช้</th>
+                              <th className="p-3 text-right font-bold text-amber-600 dark:text-amber-400">เศษเหลือ/เส้น (ม.)</th>
+                              <th className="p-3 text-right">เศษสูญ (%)</th>
+                              <th className="p-3 text-right">น้ำหนักรวม (กก.)</th>
+                              <th className="p-3 text-center">ผังตัด (12m)</th>
+                              <th className="p-3 text-center">จัดการ</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {rebarItems.map((item) => {
+                              const stdLen = item.standardLength || 12;
+                              const cutLen = item.cutLength || 0;
+                              const cutPercent = Math.min(100, (cutLen / stdLen) * 100);
+                              const pieces = item.piecesPerBar || item.piecesPerStandardBar || 1;
+                              const barsNeeded = item.standardBarsNeeded !== undefined ? item.standardBarsNeeded : (item.barsNeeded || 0);
+                              const offcutPerBar = item.offcutPerBar || 0;
+                              const scrapPercent = item.scrapPercent !== undefined ? item.scrapPercent : (item.wastePercent || 0);
+                              const weightKg = item.totalWeightKg !== undefined ? item.totalWeightKg : (item.weightKg || 0);
+                              const barType = item.rebarType || item.barType || 'DB20';
+                              const label = item.label || item.member || 'ชิ้นส่วน';
+
+                              return (
+                                <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                                  <td className="p-3 font-semibold text-slate-900 dark:text-white">
+                                    <div className="flex items-center gap-1.5">
+                                      {item.isReusedOffcut && (
+                                        <span className="px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+                                          ดึงเศษมาใช้
+                                        </span>
+                                      )}
+                                      <span>{label}</span>
+                                    </div>
+                                    {(item.usedFor || item.note) && (
+                                      <span className="block text-[10px] font-normal text-slate-400 mt-0.5">
+                                        {item.usedFor || item.note}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="p-3">
+                                    <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 font-bold text-slate-800 dark:text-slate-200">
+                                      {barType}
+                                    </span>
+                                  </td>
+                                  <td className="p-3 text-slate-500">
+                                    {item.isReusedOffcut ? 'จากเศษสต็อก' : `เส้นมาตรฐาน ${stdLen}m`}
+                                  </td>
+                                  <td className="p-3 text-right font-semibold text-slate-900 dark:text-white">
+                                    {cutLen} ม.
+                                  </td>
+                                  <td className="p-3 text-right font-semibold text-slate-900 dark:text-white">
+                                    {item.quantity} ชิ้น
+                                  </td>
+                                  <td className="p-3 text-right font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                                    {barsNeeded} <span className="text-[10px] font-normal text-slate-400">เส้น</span>
+                                  </td>
+                                  <td className="p-3 text-right font-bold text-amber-600 dark:text-amber-400">
+                                    {offcutPerBar} ม.
+                                  </td>
+                                  <td className="p-3 text-right">
+                                    <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${
+                                      scrapPercent > 15 ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                                    }`}>
+                                      {scrapPercent}%
+                                    </span>
+                                  </td>
+                                  <td className="p-3 text-right font-semibold text-indigo-600 dark:text-indigo-400">
+                                    {weightKg} กก.
+                                  </td>
+                                  <td className="p-3 text-center min-w-[140px]">
+                                    <div className="w-full bg-slate-200 dark:bg-slate-700 h-3 rounded-full overflow-hidden flex" title={`ตัด ${pieces} ชิ้น ชิ้นละ ${cutLen}m, เศษเหลือ ${offcutPerBar}m`}>
+                                      {Array.from({ length: pieces }).map((_, pIdx) => (
+                                        <div
+                                          key={pIdx}
+                                          style={{ width: `${cutPercent}%` }}
+                                          className="bg-emerald-500 border-r border-slate-950/20"
+                                        />
+                                      ))}
+                                      {offcutPerBar > 0 && (
+                                        <div className="bg-amber-400 flex-1" />
+                                      )}
+                                    </div>
+                                    <span className="text-[9px] text-slate-400 mt-0.5 block">
+                                      ตัดได้ {pieces} ท่อน/เส้น
+                                    </span>
+                                  </td>
+                                  <td className="p-3 text-center">
+                                    <div className="flex items-center justify-center gap-1">
+                                      <button
+                                        onClick={() => {
+                                          setEditingRebarItem(item);
+                                          setRebarForm({
+                                            label: label,
+                                            rebarType: barType,
+                                            standardLength: stdLen,
+                                            cutLength: cutLen,
+                                            quantity: item.quantity,
+                                            usedFor: item.usedFor || '',
+                                            note: item.note || '',
+                                            isReusedOffcut: Boolean(item.isReusedOffcut),
+                                            reusedOffcutId: item.reusedOffcutId || ''
+                                          });
+                                          setIsRebarEditorOpen(true);
+                                        }}
+                                        className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
+                                        title="แก้ไข"
+                                      >
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        onClick={() => handleDeleteRebar(item.id)}
+                                        className="p-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-500"
+                                        title="ลบ"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Sub-Tab 2: Offcut Rebar Inventory (Requirements 4, 5, 7, 8, 9) */}
+              {rebarSubTab === 'offcuts' && (
+                <div className="space-y-6">
+                  {/* Offcut Summary Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[11px] font-semibold text-slate-500">เศษเหล็กคงเหลือพร้อมใช้</div>
+                      <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">
+                        {rebarOffcuts.filter(o => o.status === 'available').length} <span className="text-xs font-normal text-slate-500">ท่อน</span>
+                      </div>
+                    </div>
+                    <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[11px] font-semibold text-slate-500">ความยาวเศษคงเหลือสะสม</div>
+                      <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+                        {rebarSummary?.totalAvailableScrapMeters || 0} <span className="text-xs font-normal text-slate-500">ม.</span>
+                      </div>
+                    </div>
+                    <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[11px] font-semibold text-slate-500">น้ำหนักเศษคงเหลือรวม</div>
+                      <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mt-1">
+                        {rebarSummary?.totalAvailableScrapWeightKg || 0} <span className="text-xs font-normal text-slate-500">กก.</span>
+                      </div>
+                    </div>
+                    <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[11px] font-semibold text-slate-500">เศษที่นำกลับมาใช้แล้ว</div>
+                      <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">
+                        {rebarOffcuts.filter(o => o.status === 'used').length} <span className="text-xs font-normal text-slate-500">ท่อน</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Filter controls */}
+                  <div className="flex items-center justify-between bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setOffcutFilter('available')}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                          offcutFilter === 'available'
+                            ? 'bg-amber-500 text-white shadow'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                        }`}
+                      >
+                        ⚡ แสดงเฉพาะเศษเหล็กที่เหลืออยู่ ({rebarOffcuts.filter(o => o.status === 'available').length})
+                      </button>
+                      <button
+                        onClick={() => setOffcutFilter('used')}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                          offcutFilter === 'used'
+                            ? 'bg-emerald-600 text-white shadow'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                        }`}
+                      >
+                        ✅ ประวัติเศษที่นำไปใช้แล้ว ({rebarOffcuts.filter(o => o.status === 'used').length})
+                      </button>
+                      <button
+                        onClick={() => setOffcutFilter('all')}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
+                          offcutFilter === 'all'
+                            ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                        }`}
+                      >
+                        ทั้งหมด ({rebarOffcuts.length})
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={() => loadRebarData(true)}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${rebarLoading ? 'animate-spin' : ''}`} /> รีเฟรชคลัง
+                    </button>
+                  </div>
+
+                  {/* Offcuts Table */}
+                  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                    {filteredOffcuts.length === 0 ? (
+                      <div className="p-12 text-center text-slate-400 text-xs">
+                        {offcutFilter === 'available' 
+                          ? 'ไม่มีเศษเหล็กคงเหลือในสต็อก (เศษทั้งหมดถูกนำไปใช้เรียบร้อยแล้ว)' 
+                          : 'ไม่มีรายการเศษเหล็กในหมวดหมู่นี้'}
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200 dark:border-slate-800">
+                            <tr>
+                              <th className="p-3">แหล่งที่มา</th>
+                              <th className="p-3">ชนิดเหล็ก</th>
+                              <th className="p-3 text-right font-bold text-amber-600 dark:text-amber-400">ความยาวเศษ (ม.)</th>
+                              <th className="p-3 text-right">จำนวน</th>
+                              <th className="p-3 text-right">น้ำหนักเศษ (กก.)</th>
+                              <th className="p-3">สถานะ</th>
+                              <th className="p-3 min-w-[220px]">เศษนำไปใช้ที่ไหน (ระบุเองได้)</th>
+                              <th className="p-3 text-center">จัดการตัดยอด</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {filteredOffcuts.map((offcut) => (
+                              <tr key={offcut.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                                <td className="p-3 font-semibold text-slate-900 dark:text-white">
+                                  {offcut.sourceLabel}
+                                  <span className="block text-[10px] font-normal text-slate-400">
+                                    {offcut.createdAt?.split('T')[0]}
+                                  </span>
+                                </td>
+                                <td className="p-3">
+                                  <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 font-bold text-slate-800 dark:text-slate-200">
+                                    {offcut.rebarType || offcut.barType}
+                                  </span>
+                                </td>
+                                <td className="p-3 text-right font-bold text-amber-600 dark:text-amber-400 text-sm">
+                                  {offcut.length} ม.
+                                </td>
+                                <td className="p-3 text-right font-semibold">
+                                  {offcut.quantity || 1} ท่อน
+                                </td>
+                                <td className="p-3 text-right font-semibold text-indigo-600 dark:text-indigo-400">
+                                  {offcut.weightKg} กก.
+                                </td>
+                                <td className="p-3">
+                                  {offcut.status === 'available' ? (
+                                    <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-semibold text-[10px]">
+                                      ยังเหลืออยู่ (พร้อมใช้)
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-semibold text-[10px]">
+                                      นำไปใช้แล้ว (ตัดยอดแล้ว)
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-3">
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      type="text"
+                                      defaultValue={offcut.usedFor || ''}
+                                      placeholder="เช่น นำไปเสริมคาน B2"
+                                      onBlur={(e) => handleUpdateOffcutNote(offcut.id, e.target.value)}
+                                      className="flex-1 px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                                    />
+                                    <span className="text-[10px] text-slate-400">พิมพ์แล้วคลิกออกเพื่อบันทึก</span>
+                                  </div>
+                                </td>
+                                <td className="p-3 text-center">
+                                  {offcut.status === 'available' ? (
+                                    <button
+                                      onClick={() => handleMarkOffcutUsed(offcut)}
+                                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 mx-auto shadow"
+                                    >
+                                      <CheckSquare className="w-3.5 h-3.5" />
+                                      <span>นำไปใช้แล้ว (ตัดยอด)</span>
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => handleRestoreOffcut(offcut.id)}
+                                      className="px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 text-slate-600 dark:text-slate-300 text-[10px] font-medium mx-auto"
+                                    >
+                                      กู้คืนกลับสต็อก
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
+
+          {/* ========================================================
+              TAB: PROJECTS
              ======================================================== */}
           {activeTab === 'projects' && (
             <div className="space-y-4">
@@ -702,7 +1166,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     <div key={proj.id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm flex flex-col group">
                       <div className="aspect-[16/10] bg-slate-100 dark:bg-slate-800 relative overflow-hidden">
                         {proj.images?.[0] ? (
-                          <img src={proj.images[0]} alt={proj.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                          <img src={getImgSrc(proj.images[0])} alt={proj.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-slate-400 text-xs">ไม่มีรูปภาพ</div>
                         )}
@@ -729,7 +1193,13 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                               <Edit2 className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => handleDeleteProject(proj.id)}
+                              onClick={async () => {
+                                if (window.confirm('คุณแน่ใจหรือไม่ว่าต้องการลบผลงานนี้?')) {
+                                  await api.deleteProject(proj.id);
+                                  showFeedback('success', 'ลบผลงานเรียบร้อย');
+                                  loadAllData();
+                                }
+                              }}
                               className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
                               title="ลบ"
                             >
@@ -746,7 +1216,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
           )}
 
           {/* ========================================================
-              TAB 2: CATEGORIES
+              TAB: CATEGORIES
              ======================================================== */}
           {activeTab === 'categories' && (
             <div className="space-y-6 max-w-3xl">
@@ -755,24 +1225,34 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                 <p className="text-xs text-slate-500 dark:text-slate-400">เพิ่มหรือลบหมวดหมู่ผลงานตามต้องการ</p>
               </div>
 
-              {/* Add category form */}
-              <form onSubmit={handleAddCategory} className="flex gap-2">
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                if (!newCategoryName.trim()) return;
+                try {
+                  const updated = await api.createCategory(newCategoryName.trim());
+                  setCategories(updated);
+                  setNewCategoryName('');
+                  showFeedback('success', 'เพิ่มหมวดหมู่ผลงานใหม่แล้ว');
+                  onRefreshData();
+                } catch (err) {
+                  showFeedback('error', 'เพิ่มหมวดหมู่ไม่สำเร็จ: ' + err.message);
+                }
+              }} className="flex gap-2">
                 <input
                   type="text"
                   value={newCategoryName}
                   onChange={(e) => setNewCategoryName(e.target.value)}
-                  placeholder="พิมพ์ชื่อหมวดหมู่ใหม่ เช่น อาคารพาณิชย์, ตกแต่งภายใน, งานรีโนเวท..."
-                  className="flex-1 px-4 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  placeholder="พิมพ์ชื่อหมวดหมู่ใหม่ เช่น อาคารพาณิชย์, ตกแต่งภายใน..."
+                  className="flex-1 px-4 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                 />
                 <button
                   type="submit"
-                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-600/20"
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow"
                 >
                   <Plus className="w-4 h-4" /> เพิ่มหมวดหมู่
                 </button>
               </form>
 
-              {/* Category tags list */}
               <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
                   หมวดหมู่ทั้งหมดในระบบ ({categories.length} หมวด)
@@ -787,9 +1267,15 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                       <span className="font-medium">{cat}</span>
                       <button
                         type="button"
-                        onClick={() => handleDeleteCategory(cat)}
-                        className="p-1 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors ml-1"
-                        title="ลบหมวดหมู่นี้"
+                        onClick={async () => {
+                          if (window.confirm(`คุณต้องการลบหมวดหมู่ "${cat}" ใช่หรือไม่?`)) {
+                            const updated = await api.deleteCategory(cat);
+                            setCategories(updated);
+                            showFeedback('success', 'ลบหมวดหมู่เรียบร้อยแล้ว');
+                            onRefreshData();
+                          }
+                        }}
+                        className="p-1 rounded-lg text-slate-400 hover:text-rose-500"
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
@@ -801,288 +1287,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
           )}
 
           {/* ========================================================
-              TAB 3: REBAR CUT LIST & REAL-TIME CAD / SKETCHUP SYNC
-             ======================================================== */}
-          {activeTab === 'rebar' && (
-            <div className="space-y-6">
-              
-              {/* Header & Controls */}
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <Boxes className="w-5 h-5 text-emerald-500" />
-                    <span>งานถอดเหล็กเส้น (Bar Bending Schedule - BBS) & Real-Time Sync</span>
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    คำนวณจำนวนเส้นเต็ม เศษเหลือ น้ำหนักเหล็ก และซิงก์ข้อมูลสดสองทิศทางกับ AutoCAD และ SketchUp
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => loadRebarData(true)}
-                    className="px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5"
-                    title="รีเฟรชข้อมูลเหล็กเส้น"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${rebarLoading ? 'animate-spin' : ''}`} /> ซิงก์ทันที
-                  </button>
-                  <button
-                    onClick={() => {
-                      setEditingRebarItem(null);
-                      setRebarForm({ label: '', rebarType: 'DB20', standardLength: 12, cutLength: 6.0, quantity: 1, note: '' });
-                      setIsRebarEditorOpen(true);
-                    }}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-600/20"
-                  >
-                    <Plus className="w-4 h-4" /> เพิ่มรายการถอดเหล็ก
-                  </button>
-                </div>
-              </div>
-
-              {/* Summary Metric Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                  <div className="text-[11px] font-semibold text-slate-500">เหล็กมาตรฐาน (12m/10m)</div>
-                  <div className="text-2xl font-bold text-slate-900 dark:text-white mt-1">
-                    {rebarSummary?.totalStandardBars || 0} <span className="text-xs font-normal text-slate-500">เส้น</span>
-                  </div>
-                </div>
-                <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                  <div className="text-[11px] font-semibold text-slate-500">ความยาวที่ตัดใช้จริง</div>
-                  <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
-                    {rebarSummary?.totalCutLength || 0} <span className="text-xs font-normal text-slate-500">ม.</span>
-                  </div>
-                </div>
-                <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                  <div className="text-[11px] font-semibold text-slate-500">เศษเหล็กเหลือรวม</div>
-                  <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">
-                    {rebarSummary?.totalScrapLength || 0} <span className="text-xs font-normal text-slate-500">ม.</span>
-                  </div>
-                </div>
-                <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                  <div className="text-[11px] font-semibold text-slate-500">เปอร์เซ็นต์เศษสูญเปล่า</div>
-                  <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">
-                    {rebarSummary?.averageScrapPercent || 0}%
-                  </div>
-                </div>
-                <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm col-span-2 sm:col-span-1">
-                  <div className="text-[11px] font-semibold text-slate-500">น้ำหนักเหล็กรวม</div>
-                  <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mt-1">
-                    {rebarSummary?.totalWeightKg ? (rebarSummary.totalWeightKg / 1000).toFixed(2) : 0} <span className="text-xs font-normal text-slate-500">ตัน</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Real-time CAD & SketchUp Integration Banner */}
-              <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white p-5 rounded-2xl border border-slate-700/60 shadow-lg space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <span className="w-3 h-3 rounded-full bg-emerald-400 animate-ping" />
-                    <div>
-                      <h4 className="font-bold text-sm flex items-center gap-2">
-                        <span>AutoCAD & SketchUp Real-Time Sync</span>
-                        <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">
-                          Live 2-Way REST API
-                        </span>
-                      </h4>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        แก้ไขข้อมูลบนหน้าเว็บ หรือแก้บน CAD/SketchUp ข้อมูลอัปเดตตรงกันทันทีแบบ Real-Time
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <a
-                      href={api.getAutoCADPluginUrl()}
-                      download="rebar_sync.lsp"
-                      className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow transition-all"
-                    >
-                      <Download className="w-3.5 h-3.5" /> โหลดปลั๊กอิน AutoCAD (.lsp)
-                    </a>
-                    <a
-                      href={api.getSketchUpPluginUrl()}
-                      download="rebar_live_sync.rb"
-                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow transition-all"
-                    >
-                      <Download className="w-3.5 h-3.5" /> โหลดปลั๊กอิน SketchUp (.rb)
-                    </a>
-                    <a
-                      href={api.getRebarCsvUrl()}
-                      download="rebar_bbs.csv"
-                      className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow transition-all"
-                    >
-                      <FileSpreadsheet className="w-3.5 h-3.5" /> Export Excel/CSV
-                    </a>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-                  <div>
-                    <div className="font-bold text-rose-400 mb-1 flex items-center gap-1">
-                      <span>📐 วิธีใช้ใน AutoCAD:</span>
-                    </div>
-                    <ol className="list-decimal list-inside space-y-0.5 text-slate-300 text-[11px]">
-                      <li>เปิด AutoCAD พิมพ์คำสั่ง <code className="text-amber-300 bg-slate-800 px-1 rounded">APPLOAD</code> แล้วเลือกไฟล์ <code className="text-amber-300">rebar_sync.lsp</code></li>
-                      <li>พิมพ์ <code className="text-amber-300 bg-slate-800 px-1 rounded">REBAR_SYNC</code> เพื่อดึงตารางเหล็กและเขียนลง Drawing อัตโนมัติ</li>
-                      <li>พิมพ์ <code className="text-amber-300 bg-slate-800 px-1 rounded">REBAR_DRAW</code> เพื่อวาดเหล็กเส้นมาตรฐานตามขนาดและสเกล</li>
-                    </ol>
-                  </div>
-                  <div>
-                    <div className="font-bold text-blue-400 mb-1 flex items-center gap-1">
-                      <span>🧊 วิธีใช้ใน SketchUp:</span>
-                    </div>
-                    <ol className="list-decimal list-inside space-y-0.5 text-slate-300 text-[11px]">
-                      <li>เปิด SketchUp เมนู <code className="text-amber-300 bg-slate-800 px-1 rounded">Extensions &gt; Developer &gt; Ruby Console</code></li>
-                      <li>พิมพ์ <code className="text-amber-300 bg-slate-800 px-1 rounded">load 'rebar_live_sync.rb'</code> แล้วกด Enter</li>
-                      <li>หน้าต่าง Live Dialog ซิงก์ข้อมูลและปุ่มสร้างโมเดลเหล็ก 3D ทรงกระบอกจะเปิดขึ้นทันที</li>
-                    </ol>
-                  </div>
-                </div>
-              </div>
-
-              {/* Rebar Table */}
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                  <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500">
-                    ตารางถอดเหล็กเส้นและคำนวณเศษคงเหลือ ({rebarItems.length} รายการ)
-                  </h4>
-                  <div className="text-xs text-slate-400 flex items-center gap-2">
-                    <label className="flex items-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={rebarAutoSync}
-                        onChange={(e) => setRebarAutoSync(e.target.checked)}
-                        className="rounded text-emerald-600 w-3.5 h-3.5"
-                      />
-                      <span>Auto-Sync ทุก 5 วิ</span>
-                    </label>
-                  </div>
-                </div>
-
-                {rebarItems.length === 0 ? (
-                  <div className="p-12 text-center text-slate-400 text-xs">
-                    ยังไม่มีรายการถอดเหล็กเส้น กดปุ่ม "เพิ่มรายการถอดเหล็ก" ด้านบน
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs text-left">
-                      <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200 dark:border-slate-800">
-                        <tr>
-                          <th className="p-3">หมวด / ตำแหน่ง</th>
-                          <th className="p-3">ชนิดเหล็ก</th>
-                          <th className="p-3">สเปกความยาว</th>
-                          <th className="p-3 text-right">ตัดใช้ (ม.)</th>
-                          <th className="p-3 text-right">จำนวนชิ้น</th>
-                          <th className="p-3 text-right font-bold text-emerald-600 dark:text-emerald-400">เส้นเต็มที่ใช้</th>
-                          <th className="p-3 text-right font-bold text-amber-600 dark:text-amber-400">เศษเหลือ/เส้น (ม.)</th>
-                          <th className="p-3 text-right">เศษสูญ (%)</th>
-                          <th className="p-3 text-right">น้ำหนักรวม (กก.)</th>
-                          <th className="p-3 text-center">ผังตัด (12m)</th>
-                          <th className="p-3 text-center">จัดการ</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                        {rebarItems.map((item) => {
-                          const cutPercent = Math.min(100, (item.cutLength / item.standardLength) * 100);
-                          const offcutPercent = Math.max(0, 100 - (cutPercent * item.piecesPerBar));
-                          return (
-                            <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                              <td className="p-3 font-semibold text-slate-900 dark:text-white">
-                                {item.label}
-                                {item.note && <span className="block text-[10px] font-normal text-slate-400">{item.note}</span>}
-                              </td>
-                              <td className="p-3">
-                                <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 font-bold text-slate-800 dark:text-slate-200">
-                                  {item.rebarType}
-                                </span>
-                              </td>
-                              <td className="p-3 text-slate-500">
-                                เส้นมาตรฐาน {item.standardLength}m
-                              </td>
-                              <td className="p-3 text-right font-semibold text-slate-900 dark:text-white">
-                                {item.cutLength} ม.
-                              </td>
-                              <td className="p-3 text-right font-semibold text-slate-900 dark:text-white">
-                                {item.quantity} ชิ้น
-                              </td>
-                              <td className="p-3 text-right font-bold text-emerald-600 dark:text-emerald-400 text-sm">
-                                {item.standardBarsNeeded} <span className="text-[10px] font-normal text-slate-400">เส้น</span>
-                              </td>
-                              <td className="p-3 text-right font-bold text-amber-600 dark:text-amber-400">
-                                {item.offcutPerBar} ม.
-                              </td>
-                              <td className="p-3 text-right">
-                                <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${
-                                  item.scrapPercent > 15 ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                                }`}>
-                                  {item.scrapPercent}%
-                                </span>
-                              </td>
-                              <td className="p-3 text-right font-semibold text-indigo-600 dark:text-indigo-400">
-                                {item.totalWeightKg} กก.
-                              </td>
-                              <td className="p-3 text-center min-w-[140px]">
-                                {/* Visual 12m Cutting Diagram Bar */}
-                                <div className="w-full bg-slate-200 dark:bg-slate-700 h-3 rounded-full overflow-hidden flex" title={`ตัด ${item.piecesPerBar} ชิ้น ชิ้นละ ${item.cutLength}m, เศษเหลือ ${item.offcutPerBar}m`}>
-                                  {Array.from({ length: item.piecesPerBar }).map((_, pIdx) => (
-                                    <div
-                                      key={pIdx}
-                                      style={{ width: `${cutPercent}%` }}
-                                      className="bg-emerald-500 border-r border-slate-950/20"
-                                    />
-                                  ))}
-                                  {item.offcutPerBar > 0 && (
-                                    <div
-                                      style={{ width: `${offcutPercent}%` }}
-                                      className="bg-amber-400 flex-1"
-                                    />
-                                  )}
-                                </div>
-                                <span className="text-[9px] text-slate-400 mt-0.5 block">
-                                  ตัดได้ {item.piecesPerBar} ท่อน/เส้น
-                                </span>
-                              </td>
-                              <td className="p-3 text-center">
-                                <div className="flex items-center justify-center gap-1">
-                                  <button
-                                    onClick={() => {
-                                      setEditingRebarItem(item);
-                                      setRebarForm({
-                                        label: item.label,
-                                        rebarType: item.rebarType,
-                                        standardLength: item.standardLength,
-                                        cutLength: item.cutLength,
-                                        quantity: item.quantity,
-                                        note: item.note || ''
-                                      });
-                                      setIsRebarEditorOpen(true);
-                                    }}
-                                    className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
-                                    title="แก้ไข"
-                                  >
-                                    <Edit2 className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    onClick={() => handleDeleteRebar(item.id)}
-                                    className="p-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-500"
-                                    title="ลบ"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-            </div>
-          )}
-
-          {/* ========================================================
-              TAB 4: SITE LOGS (บันทึกตรวจงาน & ติชม)
+              TAB: SITE LOGS (Fix image display & upload)
              ======================================================== */}
           {activeTab === 'sitelogs' && (
             <div className="space-y-4">
@@ -1111,7 +1316,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     });
                     setIsSiteLogEditorOpen(true);
                   }}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-md shadow-blue-600/20"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow"
                 >
                   <Plus className="w-4 h-4" /> เพิ่มบันทึกตรวจงาน
                 </button>
@@ -1119,7 +1324,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
 
               {siteLogs.length === 0 ? (
                 <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-slate-400 text-xs">
-                  ยังไม่มีบันทึกตรวจงาน กดปุ่ม "เพิ่มบันทึกตรวจงาน" ด้านบนเพื่อเริ่มต้น
+                  ยังไม่มีบันทึกตรวจงาน กดปุ่ม "เพิ่มบันทึกตรวจงาน" ด้านบน
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -1169,44 +1374,34 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                         </div>
                       </div>
 
-                      {/* Dimensions & Description */}
-                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
-                        <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60">
-                          <span className="text-slate-400 block text-[10px]">ประเภทงาน</span>
-                          <span className="font-semibold text-slate-800 dark:text-slate-200">{log.workType}</span>
-                        </div>
-                        <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 sm:col-span-2">
-                          <span className="text-slate-400 block text-[10px]">ขนาดการวัด</span>
-                          <span className="font-semibold text-slate-800 dark:text-slate-200">
-                            กว้าง {log.dimensions?.width || '-'} × ยาว {log.dimensions?.length || '-'} × หนา/ลึก {log.dimensions?.thickness || '-'} {log.dimensions?.unit || 'ม.'}
-                          </span>
-                        </div>
-                        <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60">
-                          <span className="text-slate-400 block text-[10px]">การแก้ไข</span>
-                          <span className="font-semibold text-slate-800 dark:text-slate-200">{log.actionTaken}</span>
-                        </div>
-                      </div>
-
-                      {/* Site Photos */}
+                      {/* Site Photos with reliable src resolution */}
                       {log.images && log.images.length > 0 && (
                         <div className="flex gap-2 overflow-x-auto pb-1">
-                          {log.images.map((imgUrl, i) => (
-                            <img
-                              key={i}
-                              src={imgUrl}
-                              alt=""
-                              onClick={() => setZoomPhotoUrl(imgUrl)}
-                              className="w-24 h-24 rounded-xl object-cover border border-slate-200 dark:border-slate-700 cursor-pointer hover:opacity-90"
-                            />
-                          ))}
+                          {log.images.map((img, i) => {
+                            const src = getImgSrc(img);
+                            if (!src) return null;
+                            return (
+                              <div key={i} className="relative w-24 h-24 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 cursor-pointer group">
+                                <img
+                                  src={src}
+                                  alt=""
+                                  onClick={() => setZoomPhotoUrl(src)}
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                />
+                                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                  <ZoomIn className="w-4 h-4 text-white" />
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
 
-                      {/* Public Feedbacks and Admin responses */}
+                      {/* Feedbacks */}
                       {log.feedbacks && log.feedbacks.length > 0 && (
                         <div className="bg-slate-50 dark:bg-slate-800/40 p-3.5 rounded-xl space-y-2 border border-slate-200 dark:border-slate-800">
-                          <div className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                            <span>💬 ข้อเสนอแนะจากผู้ชม ({log.feedbacks.length} รายการ):</span>
+                          <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                            💬 ข้อเสนอแนะจากผู้ชม ({log.feedbacks.length} รายการ):
                           </div>
                           {log.feedbacks.map((fb, fbIdx) => (
                             <div key={fbIdx} className="bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-700 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1223,20 +1418,18 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                                 </div>
                                 <p className="text-slate-600 dark:text-slate-300 mt-1">{fb.comment}</p>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => handleRespondFeedback(log.id, fbIdx, fb.approved)}
-                                  className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1 transition-colors ${
-                                    fb.approved
-                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-400'
-                                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-emerald-600 hover:text-white'
-                                  }`}
-                                >
-                                  <CheckCheck className="w-3.5 h-3.5" />
-                                  <span>{fb.approved ? 'รับเรื่องแล้ว (แสดงบนเว็บ)' : 'กดรับเรื่อง'}</span>
-                                </button>
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRespondFeedback(log.id, fbIdx, fb.approved)}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1 ${
+                                  fb.approved
+                                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-400'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-emerald-600 hover:text-white'
+                                }`}
+                              >
+                                <CheckCheck className="w-3.5 h-3.5" />
+                                <span>{fb.approved ? 'รับเรื่องแล้ว (แสดงบนเว็บ)' : 'กดรับเรื่อง'}</span>
+                              </button>
                             </div>
                           ))}
                         </div>
@@ -1249,16 +1442,16 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
           )}
 
           {/* ========================================================
-              TAB 5: PRIVATE VAULT (PIN)
+              TAB: PRIVATE VAULT (PIN: 0966390496)
              ======================================================== */}
           {activeTab === 'vault' && (
             <div className="space-y-6 max-w-3xl">
               <div>
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <Lock className="w-5 h-5 text-emerald-500" /> ห้องเก็บอีเมล & รหัสส่วนตัว (Private Vault)
+                  <Lock className="w-5 h-5 text-emerald-500" /> ห้องเก็บอีเมล & ข้อมูลส่วนตัว (Private Vault)
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  พื้นที่ส่วนตัวป้องกันด้วยรหัสผ่าน PIN แยกต่างหาก สำหรับจัดเก็บอีเมลหลายบัญชีพร้อมปุ่มคัดลอก
+                  พื้นที่ส่วนตัวป้องกันด้วยรหัสผ่าน PIN แยกต่างหาก (รหัสผ่านเข้าห้อง: <b>0966390496</b>)
                 </p>
               </div>
 
@@ -1270,16 +1463,16 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                   <div>
                     <h4 className="font-bold text-base text-slate-900 dark:text-white">กรุณาใส่รหัส PIN เพื่อเข้าห้องส่วนตัว</h4>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                      (รหัสตั้งต้นเริ่มต้นคือ: <code className="text-emerald-600 font-bold">1234</code>)
+                      (ใส่รหัสผ่านเพื่อปลดล็อกข้อมูลส่วนตัว)
                     </p>
                   </div>
                   <form onSubmit={handleUnlockVault} className="space-y-3">
                     <input
                       type="password"
-                      maxLength={12}
+                      maxLength={15}
                       value={vaultPinInput}
                       onChange={(e) => setVaultPinInput(e.target.value)}
-                      placeholder="ใส่รหัส PIN 4-6 หลัก"
+                      placeholder="ใส่รหัส PIN เข้าห้อง"
                       className="w-full px-4 py-3 text-center text-lg tracking-widest rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                     {vaultPinError && (
@@ -1295,7 +1488,6 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {/* Vault Header Controls */}
                   <div className="flex items-center justify-between p-4 bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl border border-emerald-200 dark:border-emerald-800/40">
                     <div className="flex items-center gap-2 text-xs text-emerald-800 dark:text-emerald-300 font-medium">
                       <ShieldCheck className="w-4 h-4 text-emerald-600" />
@@ -1304,7 +1496,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => setIsChangePinOpen(!isChangePinOpen)}
-                        className="px-3 py-1.5 text-xs bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 font-medium"
+                        className="px-3 py-1.5 text-xs bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border rounded-xl hover:bg-slate-50 font-medium"
                       >
                         เปลี่ยนรหัส PIN
                       </button>
@@ -1317,7 +1509,6 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     </div>
                   </div>
 
-                  {/* Change PIN Box */}
                   {isChangePinOpen && (
                     <form onSubmit={handleChangePin} className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
                       <h4 className="text-xs font-bold text-slate-900 dark:text-white">ตั้งรหัส PIN ใหม่</h4>
@@ -1327,7 +1518,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                           value={newPinValue}
                           onChange={(e) => setNewPinValue(e.target.value)}
                           placeholder="ใส่รหัส PIN ใหม่ (อย่างน้อย 4 หลัก)"
-                          className="flex-1 px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                          className="flex-1 px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                         />
                         <button
                           type="submit"
@@ -1339,7 +1530,6 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     </form>
                   )}
 
-                  {/* Add Vault Item Form */}
                   <form onSubmit={handleAddVaultItem} className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">เพิ่มรายการอีเมล / บัญชีใหม่</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1348,7 +1538,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                         value={newVaultItem.label}
                         onChange={(e) => setNewVaultItem({ ...newVaultItem, label: e.target.value })}
                         placeholder="ชื่อบัญชี (เช่น Gmail งานนอก)"
-                        className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                        className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                       />
                       <input
                         type="text"
@@ -1356,14 +1546,14 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                         value={newVaultItem.emailOrId}
                         onChange={(e) => setNewVaultItem({ ...newVaultItem, emailOrId: e.target.value })}
                         placeholder="อีเมล หรือ Username"
-                        className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                        className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                       />
                       <input
                         type="text"
                         value={newVaultItem.note}
                         onChange={(e) => setNewVaultItem({ ...newVaultItem, note: e.target.value })}
                         placeholder="หมายเหตุ / วัตถุประสงค์"
-                        className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                        className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                       />
                     </div>
                     <button
@@ -1374,7 +1564,6 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     </button>
                   </form>
 
-                  {/* Vault Items List */}
                   <div className="space-y-2">
                     {vaultItems.map((item) => (
                       <div
@@ -1421,7 +1610,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
           )}
 
           {/* ========================================================
-              TAB 6: MESSAGES & HIRE INQUIRIES (Requirement 1)
+              TAB: MESSAGES
              ======================================================== */}
           {activeTab === 'messages' && (
             <div className="space-y-4">
@@ -1432,7 +1621,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     <span>กล่องข้อความจ้างงาน & รูปภาพแนบ</span>
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    ข้อความและรูปถ่ายหน้างานที่ลูกค้าส่งผ่านแบบฟอร์ม (กด "เปิดดูรายละเอียด" เพื่อดูข้อมูลครบถ้วน)
+                    ข้อความและรูปถ่ายหน้างานที่ลูกค้าส่งผ่านแบบฟอร์ม
                   </p>
                 </div>
                 {unreadMessagesCount > 0 && (
@@ -1479,15 +1668,25 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                             <Eye className="w-3.5 h-3.5" /> เปิดดูรายละเอียด
                           </button>
                           <button
-                            onClick={() => handleToggleMessage(msg.id, msg.status)}
-                            className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                            onClick={async () => {
+                              const next = msg.status === 'unread' ? 'read' : 'unread';
+                              await api.updateMessageStatus(msg.id, next);
+                              setMessages(messages.map(m => m.id === msg.id ? { ...m, status: next } : m));
+                            }}
+                            className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100"
                           >
                             {msg.status === 'unread' ? 'ทำเครื่องหมายว่าติดต่อแล้ว' : 'ตั้งเป็นยังไม่ติดต่อ'}
                           </button>
                           <button
-                            onClick={() => handleDeleteMessage(msg.id)}
-                            className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl"
-                            title="ลบข้อความ"
+                            onClick={async () => {
+                              if (window.confirm('คุณต้องการลบข้อความนี้ใช่หรือไม่?')) {
+                                await api.deleteMessage(msg.id);
+                                setMessages(messages.filter(m => m.id !== msg.id));
+                                showFeedback('success', 'ลบข้อความเรียบร้อย');
+                              }
+                            }}
+                            className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-xl"
+                            title="ลบ"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -1497,29 +1696,6 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                       <p className="text-xs text-slate-700 dark:text-slate-300 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl line-clamp-2">
                         {msg.message || 'ไม่มีรายละเอียดเพิ่มเติม'}
                       </p>
-
-                      {/* Attached Customer Photos thumbnails */}
-                      {msg.images && msg.images.length > 0 && (
-                        <div>
-                          <div className="text-[11px] font-semibold text-slate-500 mb-1.5 flex items-center gap-1">
-                            <ImageIcon className="w-3.5 h-3.5" /> รูปภาพที่ลูกค้าแนบมา ({msg.images.length} ภาพ):
-                          </div>
-                          <div className="flex gap-2 overflow-x-auto pb-1">
-                            {msg.images.map((imgUrl, i) => (
-                              <div
-                                key={i}
-                                onClick={() => setZoomPhotoUrl(imgUrl)}
-                                className="block relative aspect-square w-20 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 cursor-pointer hover:opacity-90 group"
-                              >
-                                <img src={imgUrl} alt="" className="w-full h-full object-cover" />
-                                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                                  <ZoomIn className="w-4 h-4 text-white" />
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   ))}
                 </div>
@@ -1528,7 +1704,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
           )}
 
           {/* ========================================================
-              TAB 7: SETTINGS & FULL PROFILE EDITOR (Requirements 3 & 4)
+              TAB: SETTINGS & FULL PROFILE
              ======================================================== */}
           {activeTab === 'settings' && profile && (
             <form onSubmit={handleSaveSettings} className="max-w-3xl space-y-6">
@@ -1539,7 +1715,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                 </p>
               </div>
 
-              {/* Profile Details (ชื่อ, ตำแหน่ง, ประวัติ, ข้อมูลติดต่อ) */}
+              {/* Profile Details */}
               <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4">
                 <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
                   <User className="w-4 h-4 text-emerald-500" /> ข้อมูลโปรไฟล์ส่วนตัว (Profile Information)
@@ -1547,83 +1723,80 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">ชื่อ-นามสกุล</label>
+                    <label className="block text-xs font-semibold mb-1">ชื่อ-นามสกุล</label>
                     <input
                       type="text"
                       value={profile.name || ''}
                       onChange={(e) => setProfile({ ...profile, name: e.target.value })}
                       placeholder="ยุทธการ คำกลอน"
-                      className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">ตำแหน่ง / สโลแกน</label>
+                    <label className="block text-xs font-semibold mb-1">ตำแหน่ง / สโลแกน</label>
                     <input
                       type="text"
                       value={profile.title || ''}
                       onChange={(e) => setProfile({ ...profile, title: e.target.value })}
                       placeholder="เขียนแบบบ้าน 3D SketchUp • ถอดแบบก่อสร้าง AutoCAD"
-                      className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">คำอธิบายตัวเอง (Bio)</label>
+                  <label className="block text-xs font-semibold mb-1">คำอธิบายตัวเอง (Bio)</label>
                   <textarea
                     rows={3}
                     value={profile.bio || ''}
                     onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
-                    placeholder="เขียนอธิบายความเชี่ยวชาญ ประสบการณ์ทำงาน..."
-                    className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                    className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                   />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">เบอร์โทรศัพท์หลัก</label>
+                    <label className="block text-xs font-semibold mb-1">เบอร์โทรศัพท์หลัก</label>
                     <input
                       type="text"
                       value={profile.phone || ''}
                       onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
                       placeholder="064-303-2859"
-                      className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">เบอร์โทรศัพท์สำรอง</label>
+                    <label className="block text-xs font-semibold mb-1">เบอร์โทรศัพท์สำรอง</label>
                     <input
                       type="text"
                       value={profile.altPhone || ''}
                       onChange={(e) => setProfile({ ...profile, altPhone: e.target.value })}
                       placeholder="096-203-3005"
-                      className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">อีเมล</label>
+                    <label className="block text-xs font-semibold mb-1">อีเมล</label>
                     <input
                       type="email"
                       value={profile.email || ''}
                       onChange={(e) => setProfile({ ...profile, email: e.target.value })}
-                      placeholder="yutthakan@example.com"
-                      className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">LINE ID</label>
+                    <label className="block text-xs font-semibold mb-1">LINE ID</label>
                     <input
                       type="text"
                       value={profile.lineId || ''}
                       onChange={(e) => setProfile({ ...profile, lineId: e.target.value })}
-                      placeholder="ไอดีไลน์สำหรับติดต่อ"
-                      className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Photos & Cover uploads with explicit delete (Requirement 4) */}
+              {/* Photos & Cover uploads */}
               <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4">
                 <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500">
                   รูปภาพโปรไฟล์และภาพปก (Avatar & Cover Image)
@@ -1633,28 +1806,17 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                   <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 space-y-3">
                     <label className="block text-xs font-semibold">รูปโปรไฟล์ (Avatar)</label>
                     <div className="flex items-center gap-3">
-                      {profile.avatar ? (
-                        <img src={profile.avatar} alt="Profile" className="w-14 h-14 rounded-2xl object-cover border-2 border-emerald-500 shadow" />
-                      ) : (
-                        <div className="w-14 h-14 rounded-2xl bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-400 text-xs">
-                          ไม่มีรูป
-                        </div>
-                      )}
+                      <img src={getImgSrc(profile.avatar)} alt="Profile" className="w-14 h-14 rounded-2xl object-cover border-2 border-emerald-500 shadow" />
                       <div className="flex flex-col gap-1.5">
                         <label className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-xl cursor-pointer font-medium text-center shadow-sm">
                           ลงรูปใหม่ / เปลี่ยนรูป
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={handleAvatarUpload}
-                          />
+                          <input type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
                         </label>
                         {profile.avatar && (
                           <button
                             type="button"
-                            onClick={handleRemoveAvatar}
-                            className="px-3 py-1 bg-rose-50 dark:bg-rose-950/40 text-rose-600 border border-rose-200 dark:border-rose-900 rounded-xl text-xs hover:bg-rose-100 font-medium"
+                            onClick={() => setProfile({ ...profile, avatar: '' })}
+                            className="px-3 py-1 bg-rose-50 dark:bg-rose-950/40 text-rose-600 border border-rose-200 rounded-xl text-xs hover:bg-rose-100 font-medium"
                           >
                             ลบรูปโปรไฟล์
                           </button>
@@ -1667,28 +1829,17 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                   <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 space-y-3">
                     <label className="block text-xs font-semibold">ภาพปกหน้าแรก (Cover Banner)</label>
                     <div className="space-y-2">
-                      {profile.coverImage ? (
-                        <img src={profile.coverImage} alt="Cover" className="w-full h-16 rounded-xl object-cover border border-slate-300 dark:border-slate-700" />
-                      ) : (
-                        <div className="w-full h-16 rounded-xl bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-400 text-xs">
-                          ไม่มีภาพปก
-                        </div>
-                      )}
+                      <img src={getImgSrc(profile.cover || profile.coverImage)} alt="Cover" className="w-full h-16 rounded-xl object-cover border border-slate-300 dark:border-slate-700" />
                       <div className="flex items-center gap-2">
                         <label className="flex-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-xl cursor-pointer font-medium text-center shadow-sm">
                           ลงภาพปกใหม่ / เปลี่ยน
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={handleCoverUpload}
-                          />
+                          <input type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} />
                         </label>
-                        {profile.coverImage && (
+                        {(profile.cover || profile.coverImage) && (
                           <button
                             type="button"
-                            onClick={handleRemoveCover}
-                            className="px-3 py-1.5 bg-rose-50 dark:bg-rose-950/40 text-rose-600 border border-rose-200 dark:border-rose-900 rounded-xl text-xs hover:bg-rose-100 font-medium"
+                            onClick={() => setProfile({ ...profile, cover: '', coverImage: '' })}
+                            className="px-3 py-1.5 bg-rose-50 dark:bg-rose-950/40 text-rose-600 border border-rose-200 rounded-xl text-xs hover:bg-rose-100 font-medium"
                           >
                             ลบภาพปก
                           </button>
@@ -1706,14 +1857,14 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">ระดับสถานะ</label>
+                    <label className="block text-xs font-semibold mb-1">ระดับสถานะ</label>
                     <select
                       value={profile.workStatus?.status || 'available'}
                       onChange={(e) => setProfile({
                         ...profile,
                         workStatus: { ...(profile.workStatus || {}), status: e.target.value }
                       })}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                     >
                       <option value="available">พร้อมรับงานทันที (สีเขียว)</option>
                       <option value="in_progress">กำลังดำเนินงาน / คิวงานแน่น (สีน้ำเงิน)</option>
@@ -1721,7 +1872,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     </select>
                   </div>
                   <div className="sm:col-span-2">
-                    <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">ข้อความแสดงบนป้าย</label>
+                    <label className="block text-xs font-semibold mb-1">ข้อความแสดงบนป้าย</label>
                     <input
                       type="text"
                       value={profile.workStatus?.text || ''}
@@ -1730,67 +1881,51 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                         workStatus: { ...(profile.workStatus || {}), text: e.target.value }
                       })}
                       placeholder="เช่น พร้อมรับงานออกแบบ & เขียนแบบ"
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                     />
                   </div>
                 </div>
-
-                <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 pt-1">
-                  <input
-                    type="checkbox"
-                    checked={profile.workStatus?.showPublic !== false}
-                    onChange={(e) => setProfile({
-                      ...profile,
-                      workStatus: { ...(profile.workStatus || {}), showPublic: e.target.checked }
-                    })}
-                    className="w-4 h-4 text-emerald-600 rounded"
-                  />
-                  <span>แสดงป้ายสถานะนี้บนหน้าเว็บสาธารณะ</span>
-                </label>
               </div>
 
-              {/* Customizable Website Texts */}
+              {/* Website Texts */}
               <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4">
                 <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500">
                   ปรับแต่งข้อความส่วนติดต่อและแบบฟอร์ม
                 </h4>
 
                 <div>
-                  <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                  <label className="block text-xs font-semibold mb-1">
                     ข้อความป้ายหัวข้อส่วนติดต่อ
                   </label>
                   <input
                     type="text"
                     value={profile.contactBadgeText || ''}
                     onChange={(e) => setProfile({ ...profile, contactBadgeText: e.target.value })}
-                    placeholder="ติดต่อจ้างงาน & ปรึกษาแบบ"
-                    className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                    className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                  <label className="block text-xs font-semibold mb-1">
                     หัวข้อหลักส่วนติดต่อ
                   </label>
                   <input
                     type="text"
                     value={profile.contactTitle || ''}
                     onChange={(e) => setProfile({ ...profile, contactTitle: e.target.value })}
-                    placeholder="ยินดีให้คำปรึกษาและร่วมงานกับคุณ"
-                    className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                    className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                  <label className="block text-xs font-semibold mb-1">
                     คำอธิบายแบบฟอร์มส่งรายละเอียดจ้างงาน
                   </label>
                   <textarea
                     rows={2}
                     value={profile.hireFormDesc || ''}
                     onChange={(e) => setProfile({ ...profile, hireFormDesc: e.target.value })}
-                    placeholder="กรอกข้อมูลเบื้องต้นด้านล่าง จะติดต่อกลับเพื่อประเมินราคาโดยเร็วที่สุด สามารถลงรูปได้และบีบอัดให้เล็กที่สุด"
-                    className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                    className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                   />
                 </div>
               </div>
@@ -1798,7 +1933,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
               <div className="pt-4 flex justify-end">
                 <button
                   type="submit"
-                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs sm:text-sm rounded-xl shadow-lg shadow-emerald-600/30 transition-all flex items-center gap-2"
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs sm:text-sm rounded-xl shadow-lg transition-all flex items-center gap-2"
                 >
                   <CheckCircle className="w-4 h-4" /> บันทึกการเปลี่ยนแปลงทั้งหมด
                 </button>
@@ -1807,7 +1942,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
           )}
 
           {/* ========================================================
-              TAB 8: SYSTEM STATUS & MONGODB
+              TAB: SYSTEM STATUS
              ======================================================== */}
           {activeTab === 'system' && (
             <div className="max-w-3xl space-y-4">
@@ -1830,19 +1965,19 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <span className="text-slate-400 block text-[11px]">Database Type</span>
-                      <span className="font-bold text-slate-800 dark:text-white">{systemStatus.database?.type}</span>
+                      <span className="font-bold text-slate-800 dark:text-white">{systemStatus.database?.type || 'MongoDB Cloud'}</span>
                     </div>
                     <div>
                       <span className="text-slate-400 block text-[11px]">Database Name</span>
-                      <span className="font-bold text-slate-800 dark:text-white">{systemStatus.database?.name}</span>
+                      <span className="font-bold text-slate-800 dark:text-white">{systemStatus.database?.name || 'yutthakan_portfolio'}</span>
                     </div>
                     <div>
                       <span className="text-slate-400 block text-[11px]">จำนวนผลงานในระบบ</span>
-                      <span className="font-bold text-slate-800 dark:text-white">{systemStatus.database?.counts?.projects || 0} รายการ</span>
+                      <span className="font-bold text-slate-800 dark:text-white">{systemStatus.database?.counts?.projects || projects.length} รายการ</span>
                     </div>
                     <div>
                       <span className="text-slate-400 block text-[11px]">จำนวนข้อความจ้างงาน</span>
-                      <span className="font-bold text-slate-800 dark:text-white">{systemStatus.database?.counts?.messages || 0} ข้อความ</span>
+                      <span className="font-bold text-slate-800 dark:text-white">{systemStatus.database?.counts?.messages || messages.length} ข้อความ</span>
                     </div>
                   </div>
                 </div>
@@ -1855,7 +1990,197 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
       </div>
 
       {/* ========================================================
-          MODAL: MESSAGE DETAIL MODAL (Requirement 1)
+          MODAL: REBAR ADD/EDIT (With Offcut Reuse Selection)
+         ======================================================== */}
+      {isRebarEditorOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                <Boxes className="w-4 h-4 text-emerald-500" />
+                {editingRebarItem ? 'แก้ไขรายการถอดเหล็กเส้น' : 'เพิ่มรายการถอดเหล็กเส้น (BBS)'}
+              </h3>
+              <button onClick={() => setIsRebarEditorOpen(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveRebar} className="p-5 overflow-y-auto space-y-4 text-xs">
+              <div>
+                <label className="block text-xs font-semibold mb-1">ชื่อชิ้นงาน / ตำแหน่ง (เช่น คาน B1, เสา C1)</label>
+                <input
+                  type="text"
+                  required
+                  value={rebarForm.label}
+                  onChange={(e) => setRebarForm({ ...rebarForm, label: e.target.value })}
+                  placeholder="เช่น เหล็กเสริมพิเศษ คาน B1 ชั้น 2"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold mb-1">ชนิดเหล็กเส้น (มอก.)</label>
+                  <select
+                    value={rebarForm.rebarType}
+                    onChange={(e) => setRebarForm({ ...rebarForm, rebarType: e.target.value, reusedOffcutId: '' })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  >
+                    <option value="DB12">DB12 (0.888 kg/m)</option>
+                    <option value="DB16">DB16 (1.580 kg/m)</option>
+                    <option value="DB20">DB20 (2.470 kg/m)</option>
+                    <option value="DB25">DB25 (3.850 kg/m)</option>
+                    <option value="DB28">DB28 (4.830 kg/m)</option>
+                    <option value="DB32">DB32 (6.310 kg/m)</option>
+                    <option value="RB6">RB6 (0.222 kg/m)</option>
+                    <option value="RB9">RB9 (0.499 kg/m)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1">ความยาวมาตรฐาน</label>
+                  <select
+                    disabled={rebarForm.isReusedOffcut}
+                    value={rebarForm.standardLength}
+                    onChange={(e) => setRebarForm({ ...rebarForm, standardLength: Number(e.target.value) })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 disabled:opacity-50"
+                  >
+                    <option value={12}>12.00 เมตร (มาตรฐาน)</option>
+                    <option value={10}>10.00 เมตร</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Requirement 4: Option to reuse existing offcuts from inventory */}
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-800/40 space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={rebarForm.isReusedOffcut}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setRebarForm({
+                        ...rebarForm,
+                        isReusedOffcut: checked,
+                        reusedOffcutId: checked && availableOffcutsForType[0] ? availableOffcutsForType[0].id : ''
+                      });
+                    }}
+                    className="rounded text-amber-600 w-4 h-4"
+                  />
+                  <span className="font-bold text-amber-900 dark:text-amber-300">
+                    ♻️ ดึงเศษเหล็กในสต็อกมาใช้แทนเส้นใหม่ (ประหยัดค่าวัสดุ)
+                  </span>
+                </label>
+
+                {rebarForm.isReusedOffcut && (
+                  <div>
+                    {availableOffcutsForType.length === 0 ? (
+                      <p className="text-[11px] text-rose-500 font-medium">
+                        ไม่มีเศษเหล็ก {rebarForm.rebarType} คงเหลือในสต็อกที่ยาวพอ
+                      </p>
+                    ) : (
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                          เลือกเศษเหล็กในสต็อก ({availableOffcutsForType.length} ชิ้นที่ใช้ได้):
+                        </label>
+                        <select
+                          value={rebarForm.reusedOffcutId}
+                          onChange={(e) => {
+                            const off = availableOffcutsForType.find(o => o.id === e.target.value);
+                            setRebarForm({
+                              ...rebarForm,
+                              reusedOffcutId: e.target.value,
+                              cutLength: off ? Math.min(rebarForm.cutLength, off.length) : rebarForm.cutLength
+                            });
+                          }}
+                          className="w-full px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 font-semibold text-amber-800 dark:text-amber-200"
+                        >
+                          {availableOffcutsForType.map(o => (
+                            <option key={o.id} value={o.id}>
+                              เศษ {o.rebarType} ยาว {o.length} ม. (จาก {o.sourceLabel})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold mb-1">ความยาวตัด (เมตร)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.1"
+                    max={rebarForm.isReusedOffcut && selectedOffcut ? selectedOffcut.length : rebarForm.standardLength}
+                    required
+                    value={rebarForm.cutLength}
+                    onChange={(e) => setRebarForm({ ...rebarForm, cutLength: Number(e.target.value) })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1">จำนวนชิ้นที่ต้องการ</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={rebarForm.quantity}
+                    onChange={(e) => setRebarForm({ ...rebarForm, quantity: Number(e.target.value) })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </div>
+              </div>
+
+              {/* Requirement 7: Notes on where offcut will be used */}
+              <div>
+                <label className="block text-xs font-semibold mb-1">เศษเหล็กที่เหลือนำไปใช้ที่ไหน (เขียนระบุด้วยตนเองได้)</label>
+                <input
+                  type="text"
+                  value={rebarForm.usedFor}
+                  onChange={(e) => setRebarForm({ ...rebarForm, usedFor: e.target.value })}
+                  placeholder="เช่น นำไปเสริมคาน B2 หรือ ทำเหล็กคอม้า"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+
+              {/* Live Preview Calculation */}
+              <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800/60 space-y-2">
+                <div className="font-bold text-emerald-800 dark:text-emerald-300 text-xs">
+                  📊 คำนวณผลลัพธ์อัตโนมัติ (Live Calculation):
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700 dark:text-slate-300">
+                  <div>ตัดได้ต่อเส้น: <b>{currentCalc.piecesPerBar} ท่อน</b></div>
+                  <div>ต้องใช้เส้นมาตรฐาน: <b className="text-emerald-600 dark:text-emerald-400 font-bold">{currentCalc.standardBarsNeeded} เส้น</b></div>
+                  <div>เศษเหลือต่อเส้น: <b className="text-amber-600 font-bold">{currentCalc.offcutPerBar} ม.</b></div>
+                  <div>เศษสูญเปล่า: <b>{currentCalc.scrapPercent}%</b></div>
+                  <div className="col-span-2">น้ำหนักเหล็กตัดใช้: <b className="text-indigo-600 dark:text-indigo-400">{currentCalc.totalWeightKg} กก.</b></div>
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsRebarEditorOpen(false)}
+                  className="px-4 py-2 border rounded-xl"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl shadow"
+                >
+                  บันทึกรายการ
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          MODAL: MESSAGE DETAIL MODAL
          ======================================================== */}
       {selectedMessage && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3">
@@ -1882,11 +2207,9 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                 <div className="text-slate-500 text-[11px] space-y-1">
                   <div>ประเภทงาน: <b className="text-slate-800 dark:text-slate-200">{selectedMessage.projectType || 'ไม่ระบุ'}</b></div>
                   {selectedMessage.budget && <div>งบประมาณ: <b className="text-slate-800 dark:text-slate-200">{selectedMessage.budget}</b></div>}
-                  {selectedMessage.targetDate && <div>กำหนดส่งงาน: <b>{selectedMessage.targetDate}</b></div>}
                 </div>
               </div>
 
-              {/* Quick Contact Buttons */}
               <div className="grid grid-cols-3 gap-2">
                 {selectedMessage.phone ? (
                   <a
@@ -1897,28 +2220,20 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     <span>โทรหาลูกค้า</span>
                     <span className="text-[10px] font-normal opacity-90 truncate max-w-full">{selectedMessage.phone}</span>
                   </a>
-                ) : (
-                  <div className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex flex-col items-center justify-center text-center text-[10px]">
-                    ไม่มีเบอร์โทร
-                  </div>
-                )}
+                ) : <div className="p-2 rounded-xl bg-slate-100 text-slate-400 text-center text-[10px]">ไม่มีเบอร์โทร</div>}
 
                 {selectedMessage.lineId ? (
                   <a
                     href={`https://line.me/R/ti/p/~${selectedMessage.lineId}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="p-2.5 rounded-xl bg-[#06C755] hover:opacity-90 text-white font-semibold flex flex-col items-center justify-center gap-1 text-center shadow"
+                    className="p-2.5 rounded-xl bg-[#06C755] text-white font-semibold flex flex-col items-center justify-center gap-1 text-center shadow"
                   >
                     <MessageCircle className="w-4 h-4" />
                     <span>ทัก LINE</span>
                     <span className="text-[10px] font-normal opacity-90 truncate max-w-full">{selectedMessage.lineId}</span>
                   </a>
-                ) : (
-                  <div className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex flex-col items-center justify-center text-center text-[10px]">
-                    ไม่มี LINE
-                  </div>
-                )}
+                ) : <div className="p-2 rounded-xl bg-slate-100 text-slate-400 text-center text-[10px]">ไม่มี LINE</div>}
 
                 {selectedMessage.email ? (
                   <a
@@ -1929,69 +2244,39 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     <span>ส่งอีเมล</span>
                     <span className="text-[10px] font-normal opacity-90 truncate max-w-full">{selectedMessage.email}</span>
                   </a>
-                ) : (
-                  <div className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex flex-col items-center justify-center text-center text-[10px]">
-                    ไม่มีอีเมล
-                  </div>
-                )}
+                ) : <div className="p-2 rounded-xl bg-slate-100 text-slate-400 text-center text-[10px]">ไม่มีอีเมล</div>}
               </div>
 
-              {/* Message Content */}
               <div>
                 <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">ข้อความรายละเอียดงาน</label>
                 <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">
                   {selectedMessage.message || 'ไม่มีข้อความเพิ่มเติม'}
                 </div>
               </div>
-
-              {/* Photos & Lightbox */}
-              {selectedMessage.images && selectedMessage.images.length > 0 && (
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
-                    รูปภาพที่ลูกค้าแนบมา ({selectedMessage.images.length} ภาพ) - กดเพื่อดูภาพใหญ่
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {selectedMessage.images.map((img, i) => (
-                      <div
-                        key={i}
-                        onClick={() => setZoomPhotoUrl(img)}
-                        className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 cursor-pointer group"
-                      >
-                        <img src={img} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                          <ZoomIn className="w-5 h-5 text-white" />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
 
-            <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/40">
+            <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <button
                 type="button"
-                onClick={() => handleDeleteMessage(selectedMessage.id)}
-                className="px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl font-medium"
+                onClick={async () => {
+                  if (window.confirm('คุณต้องการลบข้อความนี้ใช่หรือไม่?')) {
+                    await api.deleteMessage(selectedMessage.id);
+                    setMessages(messages.filter(m => m.id !== selectedMessage.id));
+                    setSelectedMessage(null);
+                    showFeedback('success', 'ลบข้อความเรียบร้อย');
+                  }
+                }}
+                className="px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-xl font-medium"
               >
                 ลบข้อความนี้
               </button>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleToggleMessage(selectedMessage.id, selectedMessage.status)}
-                  className="px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 font-medium"
-                >
-                  {selectedMessage.status === 'unread' ? 'ทำเครื่องหมายว่าติดต่อแล้ว' : 'ตั้งเป็นยังไม่ติดต่อ'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedMessage(null)}
-                  className="px-4 py-1.5 text-xs bg-slate-900 text-white dark:bg-white dark:text-slate-900 rounded-xl font-semibold"
-                >
-                  ปิด
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedMessage(null)}
+                className="px-4 py-1.5 text-xs bg-slate-900 text-white dark:bg-white dark:text-slate-900 rounded-xl font-semibold"
+              >
+                ปิด
+              </button>
             </div>
           </div>
         </div>
@@ -2010,7 +2295,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
               <X className="w-7 h-7" />
             </button>
             <img src={zoomPhotoUrl} alt="Zoom" className="max-w-full max-h-[80vh] object-contain rounded-2xl shadow-2xl" />
-            <div className="mt-3 flex items-center gap-3">
+            <div className="mt-3">
               <a
                 href={zoomPhotoUrl}
                 download="site_photo.jpg"
@@ -2019,261 +2304,6 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                 <Download className="w-4 h-4" /> ดาวน์โหลดรูปภาพต้นฉบับ
               </a>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================
-          MODAL: REBAR ADD/EDIT MODAL
-         ======================================================== */}
-      {isRebarEditorOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                <Boxes className="w-4 h-4 text-emerald-500" />
-                {editingRebarItem ? 'แก้ไขรายการถอดเหล็กเส้น' : 'เพิ่มรายการถอดเหล็กเส้น (BBS)'}
-              </h3>
-              <button onClick={() => setIsRebarEditorOpen(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveRebar} className="p-5 overflow-y-auto space-y-4 text-xs">
-              <div>
-                <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">ชื่อชิ้นงาน / ตำแหน่ง (เช่น คาน B1, เสา C1)</label>
-                <input
-                  type="text"
-                  required
-                  value={rebarForm.label}
-                  onChange={(e) => setRebarForm({ ...rebarForm, label: e.target.value })}
-                  placeholder="เช่น เหล็กเสริมพิเศษ คาน B1 ชั้น 2"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">ชนิดเหล็กเส้น (มอก.)</label>
-                  <select
-                    value={rebarForm.rebarType}
-                    onChange={(e) => setRebarForm({ ...rebarForm, rebarType: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-                  >
-                    <option value="DB12">DB12 (0.888 kg/m)</option>
-                    <option value="DB16">DB16 (1.580 kg/m)</option>
-                    <option value="DB20">DB20 (2.470 kg/m)</option>
-                    <option value="DB25">DB25 (3.850 kg/m)</option>
-                    <option value="DB28">DB28 (4.830 kg/m)</option>
-                    <option value="DB32">DB32 (6.310 kg/m)</option>
-                    <option value="RB6">RB6 (0.222 kg/m)</option>
-                    <option value="RB9">RB9 (0.499 kg/m)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">ความยาวมาตรฐาน (เมตร)</label>
-                  <select
-                    value={rebarForm.standardLength}
-                    onChange={(e) => setRebarForm({ ...rebarForm, standardLength: Number(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-                  >
-                    <option value={12}>12.00 เมตร (มาตรฐาน)</option>
-                    <option value={10}>10.00 เมตร</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">ความยาวตัด (เมตร)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.1"
-                    max={rebarForm.standardLength}
-                    required
-                    value={rebarForm.cutLength}
-                    onChange={(e) => setRebarForm({ ...rebarForm, cutLength: Number(e.target.value) })}
-                    placeholder="เช่น 6.00"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">จำนวนชิ้นที่ต้องการ</label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={rebarForm.quantity}
-                    onChange={(e) => setRebarForm({ ...rebarForm, quantity: Number(e.target.value) })}
-                    placeholder="เช่น 10"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-                  />
-                </div>
-              </div>
-
-              {/* Live Preview Calculation */}
-              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800/60 space-y-2">
-                <div className="font-bold text-emerald-800 dark:text-emerald-300 text-xs">
-                  📊 คำนวณผลลัพธ์อัตโนมัติ (Live Calculation):
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700 dark:text-slate-300">
-                  <div>ตัดได้ต่อเส้นเต็ม: <b>{currentCalc.piecesPerBar} ท่อน</b></div>
-                  <div>ต้องใช้เส้นมาตรฐาน: <b className="text-emerald-600 dark:text-emerald-400 font-bold">{currentCalc.standardBarsNeeded} เส้น</b></div>
-                  <div>เศษเหลือต่อเส้น: <b className="text-amber-600">{currentCalc.offcutPerBar} ม.</b></div>
-                  <div>เศษสูญเปล่า: <b>{currentCalc.scrapPercent}%</b></div>
-                  <div className="col-span-2">น้ำหนักเหล็กใช้จริง: <b className="text-indigo-600 dark:text-indigo-400">{currentCalc.totalWeightKg} กก.</b></div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">หมายเหตุเพิ่มเติม</label>
-                <input
-                  type="text"
-                  value={rebarForm.note}
-                  onChange={(e) => setRebarForm({ ...rebarForm, note: e.target.value })}
-                  placeholder="เช่น งอปลาย 90 องศา, เหล็กเสริมบน"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
-                />
-              </div>
-
-              <div className="pt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsRebarEditorOpen(false)}
-                  className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-100"
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl shadow-md"
-                >
-                  บันทึกรายการ
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================
-          MODAL: PROJECT EDITOR
-         ======================================================== */}
-      {isEditorOpen && editingProject && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-2xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              <h3 className="font-bold text-sm text-slate-900 dark:text-white">
-                {editingProject.id ? 'แก้ไขข้อมูลผลงาน' : 'เพิ่มผลงานใหม่'}
-              </h3>
-              <button onClick={() => setIsEditorOpen(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveProject} className="p-5 overflow-y-auto space-y-4 text-xs">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold mb-1">ชื่อผลงาน</label>
-                  <input
-                    type="text"
-                    required
-                    value={editingProject.title}
-                    onChange={(e) => setEditingProject({ ...editingProject, title: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold mb-1">หมวดหมู่</label>
-                  <select
-                    value={editingProject.category}
-                    onChange={(e) => setEditingProject({ ...editingProject, category: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-                  >
-                    {categories.map((c, i) => (
-                      <option key={i} value={c}>{c}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold mb-1">คำอธิบายผลงาน</label>
-                <textarea
-                  rows={3}
-                  value={editingProject.description}
-                  onChange={(e) => setEditingProject({ ...editingProject, description: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-                />
-              </div>
-
-              {/* Photo Upload with Ultra Compression */}
-              <div>
-                <label className="block text-xs font-semibold mb-1">รูปภาพผลงาน (ระบบบีบอัดให้เล็กที่สุดอัตโนมัติ)</label>
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*"
-                  onChange={async (e) => {
-                    const files = Array.from(e.target.files || []);
-                    if (!files.length) return;
-                    setCompressing(true);
-                    try {
-                      const compressed = await Promise.all(
-                        files.map(f => compressUltraCompact(f, 1920, 1080, 0.82))
-                      );
-                      setEditingProject(prev => ({
-                        ...prev,
-                        images: [...(prev.images || []), ...compressed]
-                      }));
-                    } catch (err) {
-                      alert('บีบอัดรูปไม่สำเร็จ: ' + err.message);
-                    } finally {
-                      setCompressing(false);
-                    }
-                  }}
-                  className="text-xs"
-                />
-                {compressing && <p className="text-emerald-600 text-[11px] mt-1">กำลังบีบอัดรูปภาพ...</p>}
-
-                {editingProject.images && editingProject.images.length > 0 && (
-                  <div className="flex gap-2 overflow-x-auto pt-2">
-                    {editingProject.images.map((img, i) => (
-                      <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden border flex-shrink-0 group">
-                        <img src={img} alt="" className="w-full h-full object-cover" />
-                        <button
-                          type="button"
-                          onClick={() => setEditingProject(prev => ({
-                            ...prev,
-                            images: prev.images.filter((_, idx) => idx !== i)
-                          }))}
-                          className="absolute top-1 right-1 p-1 bg-black/60 rounded-full text-white opacity-0 group-hover:opacity-100"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="pt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsEditorOpen(false)}
-                  className="px-4 py-2 border rounded-xl"
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-emerald-600 text-white rounded-xl font-semibold"
-                >
-                  บันทึกผลงาน
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}
@@ -2322,7 +2352,6 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                 </div>
               </div>
 
-              {/* Date, Time, Location */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-semibold mb-1">วันที่ทำงาน</label>
@@ -2353,7 +2382,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                 </div>
               </div>
 
-              {/* GPS Coordinates & Map Link */}
+              {/* GPS Coordinates */}
               <div>
                 <label className="block text-xs font-semibold mb-1">พิกัด GPS แผนที่</label>
                 <div className="flex gap-2">
@@ -2415,7 +2444,6 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                 </div>
               </div>
 
-              {/* Description & Action Taken */}
               <div>
                 <label className="block text-xs font-semibold mb-1">รายละเอียดการตรวจพบ</label>
                 <textarea
@@ -2436,7 +2464,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                 />
               </div>
 
-              {/* Photos upload */}
+              {/* Photos upload with Ultra Compression returning String dataUrl */}
               <div>
                 <label className="block text-xs font-semibold mb-1">รูปถ่ายหน้างาน (บีบอัดอัตโนมัติ)</label>
                 <input
@@ -2446,6 +2474,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                   onChange={async (e) => {
                     const files = Array.from(e.target.files || []);
                     if (!files.length) return;
+                    setCompressing(true);
                     try {
                       const compressed = await Promise.all(
                         files.map(f => compressUltraCompact(f, 1600, 1200, 0.8))
@@ -2456,33 +2485,38 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                       }));
                     } catch (err) {
                       alert('บีบอัดรูปไม่สำเร็จ: ' + err.message);
+                    } finally {
+                      setCompressing(false);
                     }
                   }}
                   className="text-xs"
                 />
+                {compressing && <p className="text-emerald-600 text-[11px] mt-1">กำลังบีบอัดรูปภาพ...</p>}
 
                 {editingSiteLog.images && editingSiteLog.images.length > 0 && (
                   <div className="flex gap-2 overflow-x-auto pt-2">
-                    {editingSiteLog.images.map((img, i) => (
-                      <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden border flex-shrink-0 group">
-                        <img src={img} alt="" className="w-full h-full object-cover" />
-                        <button
-                          type="button"
-                          onClick={() => setEditingSiteLog(prev => ({
-                            ...prev,
-                            images: prev.images.filter((_, idx) => idx !== i)
-                          }))}
-                          className="absolute top-1 right-1 p-1 bg-black/60 rounded-full text-white opacity-0 group-hover:opacity-100"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))}
+                    {editingSiteLog.images.map((img, i) => {
+                      const src = getImgSrc(img);
+                      return (
+                        <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden border flex-shrink-0 group">
+                          <img src={src} alt="" className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => setEditingSiteLog(prev => ({
+                              ...prev,
+                              images: prev.images.filter((_, idx) => idx !== i)
+                            }))}
+                            className="absolute top-1 right-1 p-1 bg-black/60 rounded-full text-white opacity-0 group-hover:opacity-100"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
 
-              {/* Public Toggle (Requirement 12) */}
               <label className="flex items-center gap-2 pt-1 cursor-pointer">
                 <input
                   type="checkbox"
@@ -2508,6 +2542,145 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                   className="px-5 py-2 bg-blue-600 text-white rounded-xl font-semibold"
                 >
                   บันทึกรายการ
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          MODAL: PROJECT EDITOR
+         ======================================================== */}
+      {isEditorOpen && editingProject && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-2xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                {editingProject.id ? 'แก้ไขข้อมูลผลงาน' : 'เพิ่มผลงานใหม่'}
+              </h3>
+              <button onClick={() => setIsEditorOpen(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                if (editingProject.id) {
+                  await api.updateProject(editingProject.id, editingProject);
+                  showFeedback('success', 'แก้ไขผลงานเรียบร้อยแล้ว');
+                } else {
+                  await api.createProject(editingProject);
+                  showFeedback('success', 'เพิ่มผลงานใหม่เรียบร้อยแล้ว');
+                }
+                setIsEditorOpen(false);
+                setEditingProject(null);
+                loadAllData();
+              } catch (err) {
+                showFeedback('error', 'บันทึกไม่สำเร็จ: ' + err.message);
+              }
+            }} className="p-5 overflow-y-auto space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold mb-1">ชื่อผลงาน</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingProject.title}
+                    onChange={(e) => setEditingProject({ ...editingProject, title: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1">หมวดหมู่</label>
+                  <select
+                    value={editingProject.category}
+                    onChange={(e) => setEditingProject({ ...editingProject, category: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  >
+                    {categories.map((c, i) => (
+                      <option key={i} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1">คำอธิบายผลงาน</label>
+                <textarea
+                  rows={3}
+                  value={editingProject.description}
+                  onChange={(e) => setEditingProject({ ...editingProject, description: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1">รูปภาพผลงาน (บีบอัดอัตโนมัติ)</label>
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*"
+                  onChange={async (e) => {
+                    const files = Array.from(e.target.files || []);
+                    if (!files.length) return;
+                    setCompressing(true);
+                    try {
+                      const compressed = await Promise.all(
+                        files.map(f => compressUltraCompact(f, 1920, 1080, 0.82))
+                      );
+                      setEditingProject(prev => ({
+                        ...prev,
+                        images: [...(prev.images || []), ...compressed]
+                      }));
+                    } catch (err) {
+                      alert('บีบอัดรูปไม่สำเร็จ: ' + err.message);
+                    } finally {
+                      setCompressing(false);
+                    }
+                  }}
+                  className="text-xs"
+                />
+                {compressing && <p className="text-emerald-600 text-[11px] mt-1">กำลังบีบอัดรูปภาพ...</p>}
+
+                {editingProject.images && editingProject.images.length > 0 && (
+                  <div className="flex gap-2 overflow-x-auto pt-2">
+                    {editingProject.images.map((img, i) => {
+                      const src = getImgSrc(img);
+                      return (
+                        <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden border flex-shrink-0 group">
+                          <img src={src} alt="" className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => setEditingProject(prev => ({
+                              ...prev,
+                              images: prev.images.filter((_, idx) => idx !== i)
+                            }))}
+                            className="absolute top-1 right-1 p-1 bg-black/60 rounded-full text-white opacity-0 group-hover:opacity-100"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEditorOpen(false)}
+                  className="px-4 py-2 border rounded-xl"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-600 text-white rounded-xl font-semibold"
+                >
+                  บันทึกผลงาน
                 </button>
               </div>
             </form>
