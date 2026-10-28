@@ -161,6 +161,35 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
 
   // ========================================================
   // REBAR & OFFCUT HANDLERS (Requirements 4, 5, 7, 8, 9)
+  // Added UI state for grouping and offcut type filtering
+  const [groupByBase, setGroupByBase] = useState('all'); // 'all', 'foundation', 'column', etc.
+  const [offcutFilterType, setOffcutFilterType] = useState(''); // e.g., 'DB20'
+
+  // Summary of required rebar per size (total length & weight)
+  const [rebarStandardSummary, setRebarStandardSummary] = useState([]);
+
+  // Re‑calculate summary whenever the rebar items list changes
+  useEffect(() => {
+    const summaryMap = {};
+    rebarItems.forEach(item => {
+      const type = item.rebarType || item.barType || 'UNKNOWN';
+      const length = Number(item.cutLength) * Number(item.quantity);
+      const unitWeight = REBAR_WEIGHTS[type] || 2.47;
+      const weight = length * unitWeight;
+      if (!summaryMap[type]) {
+        summaryMap[type] = { totalLength: 0, totalWeight: 0 };
+      }
+      summaryMap[type].totalLength += length;
+      summaryMap[type].totalWeight += weight;
+    });
+    const summaryArray = Object.entries(summaryMap).map(([type, data]) => ({
+      type,
+      totalLength: Number(data.totalLength.toFixed(2)),
+      totalWeight: Number(data.totalWeight.toFixed(2))
+    }));
+    setRebarStandardSummary(summaryArray);
+  }, [rebarItems]);
+
   // ========================================================
   const calculateRebarMetrics = (stdLen, cutLen, qty, type, isReused, offcutInitialLen) => {
     const sLen = Number(stdLen) || 12;
@@ -948,6 +977,80 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                       </div>
                     )}
                   </div>
+
+                  {/* ====== ตารางสรุปยอดสั่งซื้อแยกขนาดเหล็ก (เหล็กมาตรฐานที่ต้องสั่ง) ====== */}
+                  {rebarStandardSummary.length > 0 && (
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                      <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
+                        <FileSpreadsheet className="w-4 h-4 text-indigo-500" />
+                        <h4 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                          📦 สรุปยอดสั่งซื้อเหล็กแยกขนาด (เหล็กมาตรฐานที่ต้องสั่ง)
+                        </h4>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 font-bold uppercase tracking-wider border-b border-indigo-100 dark:border-indigo-900">
+                            <tr>
+                              <th className="p-3">ขนาดเหล็ก</th>
+                              <th className="p-3 text-right">ความยาวรวมที่ตัดใช้ (ม.)</th>
+                              <th className="p-3 text-right">จำนวนเส้นมาตรฐานที่ต้องสั่ง (12ม.)</th>
+                              <th className="p-3 text-right">น้ำหนักรวม (กก.)</th>
+                              <th className="p-3 text-right">น้ำหนักรวม (ตัน)</th>
+                              <th className="p-3 text-right">น้ำหนักต่อเมตร</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {rebarStandardSummary.map((row, idx) => {
+                              const unitW = REBAR_WEIGHTS[row.type] || 2.47;
+                              const barsRequired = Math.ceil(row.totalLength / 12);
+                              return (
+                                <tr key={idx} className="hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 transition-colors">
+                                  <td className="p-3">
+                                    <span className="px-2.5 py-1 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-200 font-extrabold text-sm tracking-wide">
+                                      {row.type}
+                                    </span>
+                                  </td>
+                                  <td className="p-3 text-right font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                                    {row.totalLength.toFixed(2)} <span className="text-xs font-normal text-slate-400">ม.</span>
+                                  </td>
+                                  <td className="p-3 text-right font-bold text-slate-800 dark:text-slate-200 text-sm">
+                                    {barsRequired} <span className="text-xs font-normal text-slate-400">เส้น</span>
+                                  </td>
+                                  <td className="p-3 text-right font-bold text-indigo-600 dark:text-indigo-400 text-sm">
+                                    {row.totalWeight.toFixed(2)} <span className="text-xs font-normal text-slate-400">กก.</span>
+                                  </td>
+                                  <td className="p-3 text-right text-slate-700 dark:text-slate-300 font-semibold">
+                                    {(row.totalWeight / 1000).toFixed(3)} <span className="text-xs font-normal text-slate-400">ตัน</span>
+                                  </td>
+                                  <td className="p-3 text-right text-slate-500">
+                                    {unitW} <span className="text-xs">กก./ม.</span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot className="bg-slate-50 dark:bg-slate-800/60 font-bold border-t-2 border-slate-300 dark:border-slate-700">
+                            <tr>
+                              <td className="p-3 text-slate-700 dark:text-slate-200 font-extrabold">รวมทั้งหมด</td>
+                              <td className="p-3 text-right text-emerald-600 dark:text-emerald-400">
+                                {rebarStandardSummary.reduce((s, r) => s + r.totalLength, 0).toFixed(2)} ม.
+                              </td>
+                              <td className="p-3 text-right text-slate-800 dark:text-slate-200">
+                                {rebarStandardSummary.reduce((s, r) => s + Math.ceil(r.totalLength / 12), 0)} เส้น
+                              </td>
+                              <td className="p-3 text-right text-indigo-600 dark:text-indigo-400">
+                                {rebarStandardSummary.reduce((s, r) => s + r.totalWeight, 0).toFixed(2)} กก.
+                              </td>
+                              <td className="p-3 text-right text-slate-700 dark:text-slate-300">
+                                {(rebarStandardSummary.reduce((s, r) => s + r.totalWeight, 0) / 1000).toFixed(3)} ตัน
+                              </td>
+                              <td className="p-3"></td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
