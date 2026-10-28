@@ -34,10 +34,7 @@ export const DEFAULT_OWNER = {
     line: 'https://line.me/ti/p/~0643032859',
     github: 'https://github.com/villianmai2000-hue'
   },
-  // การตั้งค่าการมองเห็น และข้อความหน้าเว็บ
-  hidePublicName: false,
-  hidePublicPhone: false,
-  hidePublicEmail: false,
+  // การตั้งค่าข้อความหน้าเว็บ
   contactBadgeText: 'ติดต่อจ้างงาน & ปรึกษาแบบ',
   contactTitle: 'ยินดีให้คำปรึกษาและร่วมงานกับคุณ',
   contactSubtitle: 'พร้อมรับงานออกแบบสถาปัตยกรรม เขียนแบบ AutoCAD โมเดล 3D SketchUp และเขียนโปรแกรมปลั๊กอิน',
@@ -156,7 +153,135 @@ const DEFAULT_SITE_LOGS = [
   }
 ];
 
-// ฟังก์ชันโหลดข้อมูล Local Fallback
+// มาตรฐานน้ำหนักเหล็กเส้นเสริมคอนกรีต (มอก. 24-2559 / วสท.) กิโลกรัมต่อเมตร
+export const REBAR_UNIT_WEIGHTS = {
+  'RB6': 0.222,
+  'RB9': 0.499,
+  'DB10': 0.617,
+  'DB12': 0.888,
+  'DB16': 1.580,
+  'DB20': 2.470,
+  'DB25': 3.850,
+  'DB28': 4.830,
+  'DB32': 6.310
+};
+
+// ข้อมูลเริ่มต้นสำหรับระบบถอดเหล็กเส้น & ตารางตัดเศษ (BBS)
+export const DEFAULT_REBAR_ITEMS = [
+  {
+    id: 'rebar-1',
+    member: 'เสา C1 (ชั้น 1)',
+    barType: 'DB20',
+    standardLength: 12.00,
+    cutLength: 6.00,
+    quantity: 4,
+    piecesPerStandardBar: 2,
+    barsNeeded: 2,
+    offcutPerBar: 0.00,
+    totalCutLength: 24.00,
+    totalMaterialLength: 24.00,
+    totalOffcutLength: 0.00,
+    wastePercent: 0.0,
+    weightPerMeter: 2.470,
+    weightKg: 59.28,
+    totalOrderWeightKg: 59.28,
+    notes: 'ตัด 6.00 ม. ได้ 2 ท่อนพอดีจากเส้น 12 ม. ไม่มีเศษเหลือ',
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'rebar-2',
+    member: 'คาน B1 (ชั้น 2)',
+    barType: 'DB16',
+    standardLength: 12.00,
+    cutLength: 4.50,
+    quantity: 2,
+    piecesPerStandardBar: 2,
+    barsNeeded: 1,
+    offcutPerBar: 3.00,
+    totalCutLength: 9.00,
+    totalMaterialLength: 12.00,
+    totalOffcutLength: 3.00,
+    wastePercent: 25.0,
+    weightPerMeter: 1.580,
+    weightKg: 14.22,
+    totalOrderWeightKg: 18.96,
+    notes: 'เศษเหลือ 3.00 ม. นำไปตัดเหล็กคอม้าหรือคานช่วงสั้นต่อได้',
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'rebar-3',
+    member: 'เหล็กปลอกเสา C1',
+    barType: 'RB6',
+    standardLength: 10.00,
+    cutLength: 1.00,
+    quantity: 20,
+    piecesPerStandardBar: 10,
+    barsNeeded: 2,
+    offcutPerBar: 0.00,
+    totalCutLength: 20.00,
+    totalMaterialLength: 20.00,
+    totalOffcutLength: 0.00,
+    wastePercent: 0.0,
+    weightPerMeter: 0.222,
+    weightKg: 4.44,
+    totalOrderWeightKg: 4.44,
+    notes: 'เหล็กปลอกเสาขนาด 20x20 ซม. ความยาวดัดปลอก 1.00 ม.',
+    updatedAt: new Date().toISOString()
+  }
+];
+
+// ฟังก์ชันคำนวณถอดเหล็กเส้นและเศษตัด
+export function calculateRebarMetrics(data) {
+  const standardLength = Number(data.standardLength) || 12.00;
+  const cutLength = Number(data.cutLength) || 6.00;
+  const quantity = Math.max(1, parseInt(data.quantity) || 1);
+  const barType = (data.barType || 'DB20').toUpperCase().trim();
+  const weightPerMeter = REBAR_UNIT_WEIGHTS[barType] || 2.47;
+
+  let piecesPerStandardBar = Math.floor(standardLength / cutLength);
+  let barsNeeded = 1;
+  let offcutPerBar = 0;
+  let totalCutLength = Number((cutLength * quantity).toFixed(2));
+  let totalMaterialLength = 0;
+  let totalOffcutLength = 0;
+  let wastePercent = 0;
+
+  if (piecesPerStandardBar >= 1) {
+    barsNeeded = Math.ceil(quantity / piecesPerStandardBar);
+    offcutPerBar = Number((standardLength - (piecesPerStandardBar * cutLength)).toFixed(2));
+    totalMaterialLength = Number((barsNeeded * standardLength).toFixed(2));
+    totalOffcutLength = Number(Math.max(0, totalMaterialLength - totalCutLength).toFixed(2));
+    wastePercent = totalMaterialLength > 0 ? Number(((totalOffcutLength / totalMaterialLength) * 100).toFixed(1)) : 0;
+  } else {
+    barsNeeded = Math.ceil(totalCutLength / standardLength);
+    totalMaterialLength = Number((barsNeeded * standardLength).toFixed(2));
+    totalOffcutLength = Number(Math.max(0, totalMaterialLength - totalCutLength).toFixed(2));
+    wastePercent = totalMaterialLength > 0 ? Number(((totalOffcutLength / totalMaterialLength) * 100).toFixed(1)) : 0;
+    offcutPerBar = Number((totalOffcutLength / barsNeeded).toFixed(2));
+  }
+
+  const weightKg = Number((totalCutLength * weightPerMeter).toFixed(2));
+  const totalOrderWeightKg = Number((totalMaterialLength * weightPerMeter).toFixed(2));
+
+  return {
+    ...data,
+    barType,
+    standardLength,
+    cutLength,
+    quantity,
+    piecesPerStandardBar: Math.max(1, piecesPerStandardBar),
+    barsNeeded,
+    offcutPerBar,
+    totalCutLength,
+    totalMaterialLength,
+    totalOffcutLength,
+    wastePercent,
+    weightPerMeter,
+    weightKg,
+    totalOrderWeightKg,
+    updatedAt: new Date().toISOString()
+  };
+}
 function readLocalJson(fileName, defaultVal) {
   const filePath = path.join(DATA_DIR, `${fileName}.json`);
   if (!fs.existsSync(filePath)) {
@@ -243,6 +368,14 @@ async function initAtlasData(database) {
     const logCount = await siteLogsCol.countDocuments();
     if (logCount === 0) {
       await siteLogsCol.insertMany(DEFAULT_SITE_LOGS);
+    }
+
+    // 5. ตรวจสอบ Rebar Items (งานถอดเหล็กเส้น)
+    const rebarCol = database.collection('rebar_items');
+    const rebarCount = await rebarCol.countDocuments();
+    if (rebarCount === 0) {
+      await rebarCol.insertMany(DEFAULT_REBAR_ITEMS);
+      console.log('✅ Seeded demo rebar BBS items in MongoDB Atlas');
     }
   } catch (e) {
     console.error('Error in initAtlasData:', e);
@@ -458,6 +591,17 @@ export const DataService = {
       return true;
     }
     return false;
+  },
+
+  async deleteMessage(id) {
+    const database = await connectDB();
+    if (database) {
+      await database.collection('messages').deleteOne({ id });
+      return true;
+    }
+    const messages = readLocalJson('messages', []);
+    writeLocalJson('messages', messages.filter(item => item.id !== id));
+    return true;
   },
 
   // --- Private Vault (คลังข้อมูลส่วนตัว / อีเมลกันลืม มีรหัสล็อกแยก) ---
@@ -714,5 +858,142 @@ export const DataService = {
     const files = readLocalJson('files', []);
     writeLocalJson('files', files.filter(f => f.id !== id));
     return true;
+  },
+
+  // --- Rebar Cutting List & BBS (ถอดเหล็กเส้น & ตารางตัดเศษ เชื่อมต่อ AutoCAD & SketchUp) ---
+  async getRebarItems() {
+    const database = await connectDB();
+    if (database) {
+      return await database.collection('rebar_items').find({}).sort({ updatedAt: -1 }).toArray();
+    }
+    return readLocalJson('rebar_items', DEFAULT_REBAR_ITEMS);
+  },
+
+  async createRebarItem(data) {
+    const calculated = calculateRebarMetrics({
+      ...data,
+      id: data.id || `rebar-${Date.now()}`
+    });
+    const database = await connectDB();
+    if (database) {
+      await database.collection('rebar_items').insertOne(calculated);
+      return calculated;
+    }
+    const items = readLocalJson('rebar_items', DEFAULT_REBAR_ITEMS);
+    items.unshift(calculated);
+    writeLocalJson('rebar_items', items);
+    return calculated;
+  },
+
+  async updateRebarItem(id, updates) {
+    const { _id, ...safeUpdates } = updates;
+    const existing = await (async () => {
+      const database = await connectDB();
+      if (database) return await database.collection('rebar_items').findOne({ id });
+      const items = readLocalJson('rebar_items', DEFAULT_REBAR_ITEMS);
+      return items.find(i => i.id === id);
+    })();
+
+    const calculated = calculateRebarMetrics({
+      ...(existing || {}),
+      ...safeUpdates,
+      id
+    });
+
+    const database = await connectDB();
+    if (database) {
+      await database.collection('rebar_items').updateOne(
+        { id },
+        { $set: calculated }
+      );
+      return calculated;
+    }
+    const items = readLocalJson('rebar_items', DEFAULT_REBAR_ITEMS);
+    const idx = items.findIndex(i => i.id === id);
+    if (idx !== -1) {
+      items[idx] = calculated;
+      writeLocalJson('rebar_items', items);
+      return calculated;
+    }
+    return null;
+  },
+
+  async deleteRebarItem(id) {
+    const database = await connectDB();
+    if (database) {
+      await database.collection('rebar_items').deleteOne({ id });
+      return true;
+    }
+    const items = readLocalJson('rebar_items', DEFAULT_REBAR_ITEMS);
+    writeLocalJson('rebar_items', items.filter(i => i.id !== id));
+    return true;
+  },
+
+  async bulkSyncRebar(items) {
+    if (!Array.isArray(items)) return [];
+    const calculatedItems = items.map((it, idx) => calculateRebarMetrics({
+      ...it,
+      id: it.id || `rebar-${Date.now()}-${idx}`
+    }));
+
+    const database = await connectDB();
+    if (database) {
+      await database.collection('rebar_items').deleteMany({});
+      if (calculatedItems.length > 0) {
+        await database.collection('rebar_items').insertMany(calculatedItems);
+      }
+      return calculatedItems;
+    }
+    writeLocalJson('rebar_items', calculatedItems);
+    return calculatedItems;
+  },
+
+  async getRebarSummary() {
+    const items = await this.getRebarItems();
+    const summaryByBarType = {};
+    let totalCutMeters = 0;
+    let totalOffcutMeters = 0;
+    let totalOrderMeters = 0;
+    let totalWeightKg = 0;
+
+    items.forEach(it => {
+      const type = it.barType || 'DB20';
+      if (!summaryByBarType[type]) {
+        summaryByBarType[type] = {
+          barType: type,
+          totalPieces: 0,
+          totalCutMeters: 0,
+          totalBarsNeeded: 0,
+          totalOffcutMeters: 0,
+          totalWeightKg: 0,
+          weightPerMeter: it.weightPerMeter || 2.47
+        };
+      }
+      summaryByBarType[type].totalPieces += it.quantity || 0;
+      summaryByBarType[type].totalCutMeters += it.totalCutLength || 0;
+      summaryByBarType[type].totalBarsNeeded += it.barsNeeded || 0;
+      summaryByBarType[type].totalOffcutMeters += it.totalOffcutLength || 0;
+      summaryByBarType[type].totalWeightKg += it.weightKg || 0;
+
+      totalCutMeters += it.totalCutLength || 0;
+      totalOffcutMeters += it.totalOffcutLength || 0;
+      totalOrderMeters += (it.barsNeeded || 0) * (it.standardLength || 12);
+      totalWeightKg += it.weightKg || 0;
+    });
+
+    const averageWastePercent = totalOrderMeters > 0 
+      ? Number(((totalOffcutMeters / totalOrderMeters) * 100).toFixed(1)) 
+      : 0;
+
+    return {
+      totalItemsCount: items.length,
+      totalCutMeters: Number(totalCutMeters.toFixed(2)),
+      totalOffcutMeters: Number(totalOffcutMeters.toFixed(2)),
+      totalOrderMeters: Number(totalOrderMeters.toFixed(2)),
+      totalWeightKg: Number(totalWeightKg.toFixed(2)),
+      totalWeightTons: Number((totalWeightKg / 1000).toFixed(3)),
+      averageWastePercent,
+      summaryByBarType: Object.values(summaryByBarType)
+    };
   }
 };

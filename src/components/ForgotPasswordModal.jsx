@@ -98,12 +98,9 @@ export default function ForgotPasswordModal({ isOpen, onClose, onBackToLogin }) 
                   required
                   value={contact}
                   onChange={(e) => setContact(e.target.value)}
-                  placeholder="0643032859 หรืออีเมล"
+                  placeholder="กรอกเบอร์โทรศัพท์ หรือ อีเมลที่ลงทะเบียน"
                   className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500/50 outline-none"
                 />
-                <p className="text-[11px] text-slate-400 mt-1">
-                  * เบอร์ตั้งต้นในระบบ: 064-303-2859 หรือ 096-203-3005
-                </p>
               </div>
 
               <button

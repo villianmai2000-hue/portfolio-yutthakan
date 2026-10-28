@@ -4,9 +4,7 @@ import { Phone, MessageCircle, Download, CheckCircle2, Award, Briefcase, FileCod
 export default function HeroProfile({ profile, onScrollToContact, onScrollToPortfolio, onScrollToSiteLogs }) {
   if (!profile) return null;
 
-  const isNameHidden = profile.hidePublicName;
-  const isPhoneHidden = profile.hidePublicPhone;
-  const displayName = isNameHidden ? 'สถาปัตยกรรม & ออกแบบโมเดล 3D' : profile.name;
+  const displayName = profile.name || 'ยุทธการ คำกลอน';
   const workStatus = profile.workStatus || { status: 'available', text: 'พร้อมรับงานทันที', showPublic: true };
 
   return (
@@ -92,8 +90,8 @@ export default function HeroProfile({ profile, onScrollToContact, onScrollToPort
                       <span>แชท LINE คุยงาน</span>
                     </a>
 
-                    {/* Direct Phone button only if not hidden */}
-                    {!isPhoneHidden && profile.phone && (
+                    {/* Direct Phone button */}
+                    {profile.phone && (
                       <a
                         href={`tel:${profile.phone}`}
                         className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition-colors"

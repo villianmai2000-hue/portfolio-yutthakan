@@ -21,12 +21,14 @@ export default function App() {
   const [projects, setProjects] = useState([]);
   const [categories, setCategories] = useState([]);
   const [siteLogs, setSiteLogs] = useState([]);
+  const [messages, setMessages] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [prefilledProjectForHire, setPrefilledProjectForHire] = useState('');
 
   // Modals state
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [adminInitialTab, setAdminInitialTab] = useState('projects');
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
 
   // Sync Dark mode with html class
@@ -43,16 +45,18 @@ export default function App() {
   // Initial Data Load
   const loadData = async () => {
     try {
-      const [prof, projs, cats, logs] = await Promise.all([
+      const [prof, projs, cats, logs, msgs] = await Promise.all([
         api.getProfile(),
         api.getProjects(),
         api.getCategories().catch(() => []),
-        api.getSiteLogs().catch(() => [])
+        api.getSiteLogs().catch(() => []),
+        api.getMessages().catch(() => [])
       ]);
       setProfile(prof);
       setProjects(projs);
       setCategories(cats.length ? cats : (prof?.categories || []));
       setSiteLogs(logs);
+      setMessages(msgs || []);
     } catch (err) {
       console.error('Error loading data:', err);
     }
@@ -65,6 +69,20 @@ export default function App() {
       setCurrentUser({ name: 'Admin', role: 'admin' });
     }
   }, []);
+
+  // Poll messages if logged in
+  useEffect(() => {
+    if (!currentUser) return;
+    const interval = setInterval(async () => {
+      try {
+        const msgs = await api.getMessages();
+        setMessages(msgs || []);
+      } catch (e) {
+        // quiet ignore
+      }
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [currentUser]);
 
   const handleLogout = () => {
     removeToken();
@@ -92,21 +110,24 @@ export default function App() {
     handleScrollToContact();
   };
 
-  const isNameHidden = profile?.hidePublicName;
-  const isPhoneHidden = profile?.hidePublicPhone;
-  const footerTitle = isNameHidden ? 'แฟ้มสะสมผลงาน สถาปัตยกรรม & 3D' : (profile?.name || 'ยุทธการ คำกลอน');
+  const unreadHireCount = messages.filter(m => m.status === 'unread').length;
+  const footerTitle = profile?.name || 'ยุทธการ คำกลอน';
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-300">
       
-      {/* Navigation Bar */}
+      {/* Navigation Bar with Notification Bell */}
       <Navbar
         darkMode={darkMode}
         setDarkMode={setDarkMode}
         currentUser={currentUser}
         profile={profile}
+        unreadHireCount={unreadHireCount}
         onOpenLogin={() => setIsLoginOpen(true)}
-        onOpenAdmin={() => setIsAdminOpen(true)}
+        onOpenAdmin={(tab) => {
+          setAdminInitialTab(tab || 'projects');
+          setIsAdminOpen(true);
+        }}
         onLogout={handleLogout}
       />
 
@@ -148,7 +169,7 @@ export default function App() {
             <span>• แฟ้มสะสมผลงานสถาปัตยกรรม & โมเดล 3D ออกแบบใช้งานระยะยาว 10–20 ปี</span>
           </div>
           <div className="flex items-center gap-4">
-            {!isPhoneHidden && profile?.phone && <span>เบอร์ติดต่อ: {profile.phone}</span>}
+            {profile?.phone && <span>เบอร์ติดต่อ: {profile.phone}</span>}
             {profile?.lineId && <span>LINE: {profile.lineId}</span>}
           </div>
         </div>
@@ -184,6 +205,7 @@ export default function App() {
 
       <AdminPanel
         isOpen={isAdminOpen}
+        initialTab={adminInitialTab}
         onClose={() => setIsAdminOpen(false)}
         onRefreshData={loadData}
       />

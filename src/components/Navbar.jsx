@@ -1,18 +1,18 @@
 import React from 'react';
-import { Shield, Sun, Moon, LogIn, LogOut, Layers, MessageSquare, Briefcase, User, ClipboardList } from 'lucide-react';
+import { Shield, Sun, Moon, LogIn, LogOut, Layers, MessageSquare, Briefcase, User, ClipboardList, Bell } from 'lucide-react';
 
 export default function Navbar({ 
   darkMode, 
   setDarkMode, 
   currentUser, 
   profile,
+  unreadHireCount = 0,
   onOpenLogin, 
   onOpenAdmin, 
   onLogout 
 }) {
-  const isNameHidden = profile?.hidePublicName;
-  const displayName = isNameHidden ? 'แฟ้มสะสมผลงาน สถาปัตยกรรม & 3D' : (profile?.name || 'ยุทธการ คำกลอน');
-  const logoChar = isNameHidden ? 'A' : (displayName ? displayName.charAt(0) : 'ย');
+  const displayName = profile?.name || 'ยุทธการ คำกลอน';
+  const logoChar = 'ย';
 
   return (
     <header className="sticky top-0 z-40 w-full glass-nav bg-white/85 dark:bg-slate-900/85 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 transition-colors duration-200 shadow-sm">
@@ -75,11 +75,25 @@ export default function Navbar({
             {darkMode ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-slate-600" />}
           </button>
 
-          {/* Admin Button */}
+          {/* Admin Button & Notification Bell */}
           {currentUser ? (
             <div className="flex items-center gap-2">
+              {/* Notification Bell */}
               <button
-                onClick={onOpenAdmin}
+                onClick={() => onOpenAdmin('messages')}
+                className="relative p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                title={`ข้อความจ้างงาน (${unreadHireCount} ข้อความใหม่)`}
+              >
+                <Bell className={`w-5 h-5 ${unreadHireCount > 0 ? 'text-amber-500 animate-bounce' : ''}`} />
+                {unreadHireCount > 0 && (
+                  <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center animate-pulse">
+                    {unreadHireCount}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => onOpenAdmin('projects')}
                 className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-medium shadow-sm transition-all"
               >
                 <Shield className="w-4 h-4" />

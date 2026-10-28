@@ -59,6 +59,18 @@ export const api = {
   submitContact: (data) => request('/contact', { method: 'POST', body: JSON.stringify(data) }),
   getMessages: () => request('/contact'),
   updateMessageStatus: (id, status) => request(`/contact/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
+  deleteMessage: (id) => request(`/contact/${id}`, { method: 'DELETE' }),
+
+  // Rebar BBS & Real-Time Sync (AutoCAD & SketchUp)
+  getRebarItems: () => request('/rebar'),
+  getRebarSummary: () => request('/rebar/summary'),
+  createRebarItem: (data) => request('/rebar', { method: 'POST', body: JSON.stringify(data) }),
+  updateRebarItem: (id, data) => request(`/rebar/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteRebarItem: (id) => request(`/rebar/${id}`, { method: 'DELETE' }),
+  syncRebarItems: (items) => request('/rebar/sync', { method: 'POST', body: JSON.stringify({ items }) }),
+  getAutoCADPluginUrl: () => `${BASE_URL}/rebar/plugin/autocad.lsp`,
+  getSketchUpPluginUrl: () => `${BASE_URL}/rebar/plugin/sketchup.rb`,
+  getRebarCsvUrl: () => `${BASE_URL}/rebar/export/bbs.csv`,
 
   // Private Vault (PIN Lock)
   verifyVaultPin: (pin) => request('/vault/verify-pin', { method: 'POST', body: JSON.stringify({ pin }) }),

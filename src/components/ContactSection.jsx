@@ -22,10 +22,6 @@ export default function ContactSection({ profile, prefilledProject }) {
   const [errorMessage, setErrorMessage] = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
 
-  const isNameHidden = profile?.hidePublicName;
-  const isPhoneHidden = profile?.hidePublicPhone;
-  const isEmailHidden = profile?.hidePublicEmail;
-
   // จัดการอัปโหลดและบีบอัดภาพหน้างานของลูกค้าให้มีขนาดจิ๋วที่สุด (WebP ~30-50KB)
   const handleCustomerImageUpload = async (e) => {
     const files = Array.from(e.target.files);
@@ -163,8 +159,8 @@ export default function ContactSection({ profile, prefilledProject }) {
               </div>
             </a>
 
-            {/* Direct Phone Card (แสดงเฉพาะเมื่อไม่ได้ซ่อนเบอร์) */}
-            {!isPhoneHidden && (profile?.phone || profile?.altPhone) && (
+            {/* Direct Phone Card */}
+            {(profile?.phone || profile?.altPhone) && (
               <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 flex items-center gap-4">
                 <div className="w-12 h-12 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-md flex-shrink-0">
                   <Phone className="w-6 h-6" />
@@ -190,7 +186,7 @@ export default function ContactSection({ profile, prefilledProject }) {
 
             {/* Email & Location Card */}
             <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 space-y-3">
-              {!isEmailHidden && profile?.email && (
+              {profile?.email && (
                 <div className="flex items-center gap-3 text-slate-700 dark:text-slate-300 text-xs sm:text-sm">
                   <Mail className="w-4 h-4 text-emerald-500 flex-shrink-0" />
                   <span className="truncate">{profile.email}</span>
