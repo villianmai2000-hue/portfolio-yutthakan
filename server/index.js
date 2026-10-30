@@ -331,6 +331,35 @@ app.get('/api/rebar/summary', async (req, res) => {
   }
 });
 
+// ดึงรายการหมวดหมู่และชื่อชิ้นส่วนที่มีอยู่ในระบบทั้งหมด (สำหรับ AutoCAD & ปลั๊กอิน)
+app.get('/api/rebar/metadata.txt', async (req, res) => {
+  try {
+    const items = await DataService.getRebarItems();
+    const groups = [...new Set(items.map(x => (x.group || x.category || '').trim()).filter(Boolean))];
+    const members = [...new Set(items.map(x => (x.label || x.member || '').trim()).filter(Boolean))];
+    const finalGroups = groups.length > 0 ? groups : ['เหล็กเสริมเสา', 'F1-C1 NO.1', 'งานเสา', 'งานคาน', 'ฐานรากทั่วไป'];
+    const finalMembers = members.length > 0 ? members : ['เสา C1', 'เสา C2', 'คาน B1', 'คาน B2', 'ฐานราก F1', 'พื้น S1'];
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(`GROUPS:${finalGroups.join('|')}\nMEMBERS:${finalMembers.join('|')}`);
+  } catch (err) {
+    res.status(500).send('ERROR');
+  }
+});
+
+app.get('/api/rebar/groups', async (req, res) => {
+  try {
+    const items = await DataService.getRebarItems();
+    const groups = [...new Set(items.map(x => (x.group || x.category || '').trim()).filter(Boolean))];
+    const members = [...new Set(items.map(x => (x.label || x.member || '').trim()).filter(Boolean))];
+    res.json({
+      groups: groups.length > 0 ? groups : ['เหล็กเสริมเสา', 'F1-C1 NO.1', 'งานเสา', 'งานคาน', 'ฐานรากทั่วไป'],
+      members: members.length > 0 ? members : ['เสา C1', 'เสา C2', 'คาน B1', 'คาน B2', 'ฐานราก F1', 'พื้น S1']
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/rebar', async (req, res) => {
   try {
     const item = await DataService.createRebarItem(req.body);
@@ -408,19 +437,35 @@ app.delete('/api/rebar/offcuts/:id', async (req, res) => {
 });
 
 // Download AutoCAD AutoLISP Plugin (.lsp)
-app.get('/api/rebar/plugin/autocad.lsp', (req, res) => {
+app.get('/api/rebar/plugin/autocad.lsp', async (req, res) => {
   const host = req.get('host') || 'localhost:3000';
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const baseUrl = `${protocol}://${host}`;
 
+  // ดึงหมวดหมู่และชิ้นส่วนที่มีอยู่ในระบบปัจจุบัน
+  let groups = ['เหล็กเสริมเสา', 'F1-C1 NO.1', 'งานเสา', 'งานคาน', 'ฐานรากทั่วไป'];
+  let members = ['เสา C1', 'เสา C2', 'คาน B1', 'คาน B2', 'ฐานราก F1', 'พื้น S1'];
+  try {
+    const items = await DataService.getRebarItems();
+    const dbGroups = [...new Set(items.map(x => (x.group || x.category || '').trim()).filter(Boolean))];
+    const dbMembers = [...new Set(items.map(x => (x.label || x.member || '').trim()).filter(Boolean))];
+    if (dbGroups.length > 0) groups = dbGroups;
+    if (dbMembers.length > 0) members = dbMembers;
+  } catch (err) {
+    console.error('Error fetching rebar items for lsp:', err);
+  }
+
+  const groupsLsp = groups.map(g => `"${g.replace(/"/g, '\\"')}"`).join(' ');
+  const membersLsp = members.map(m => `"${m.replace(/"/g, '\\"')}"`).join(' ');
+
   const lspContent = `;;; =========================================================================
-;;; AutoLISP: Yutthakan Rebar Cut List & BBS Real-Time Sync for AutoCAD v2.5
+;;; AutoLISP: Yutthakan Rebar Cut List & BBS Real-Time Sync for AutoCAD v3.0
 ;;; สถาปนิกและผู้เชี่ยวชาญ: ยุทธการ คำกลอน
-;;; ออกแบบรองรับ Dynamic Input, Prompt Selection, และ Auto-Sync Real-Time
+;;; ออกแบบรองรับการเลือกหมวดที่มีในระบบ หรือพิมพ์ชื่อใหม่ได้ 100% ต่อเนื่องไม่หลุด
 ;;; =========================================================================
 (vl-load-com)
 
-;;; ฟังก์ชันช่วยแยกข้อความ (String Split) ป้องกันข้อผิดพลาดใน AutoCAD
+;;; ฟังก์ชันช่วยแยกข้อความ (String Split)
 (defun rebar-str-split (delim str / pos lst dlen)
   (setq dlen (strlen delim))
   (while (setq pos (vl-string-search delim str))
@@ -434,10 +479,10 @@ app.get('/api/rebar/plugin/autocad.lsp', (req, res) => {
 ;;; แสดงคำแนะนำการใช้งาน
 (defun c:REBAR_HELP ()
   (princ "\n=======================================================")
-  (princ "\nคำสั่งปลั๊กอินถอดเหล็กเส้นและคลังเศษ (BBS System v2.5):")
-  (princ "\n  REBAR_SYNC     - ส่งข้อมูลตัดเหล็กจาก CAD ขึ้นเว็บ Real-Time (6 ขั้นตอน)")
+  (princ "\nคำสั่งระบบถอดเหล็กเส้นและคลังเศษ (BBS System v3.0):")
+  (princ "\n  REBAR_SYNC     - ส่งข้อมูลตัดเหล็ก 6 ขั้นตอน (เลือกหมวดในระบบ หรือพิมพ์ใหม่)")
   (princ "\n  REBAR_DRAW     - วาดตาราง BBS สวยงามลงใน Drawing อัตโนมัติ")
-  (princ "\n  REBAR_OFFCUTS  - ตรวจสอบรายการเศษเหล็กคงเหลือสะสมใน CAD")
+  (princ "\n  REBAR_OFFCUTS  - ตรวจสอบรายการเศษเหล็กคงเหลือสะสมในระบบ")
   (princ "\n  REBAR_WEB      - เปิดหน้าเว็บจัดการเหล็กเส้นบน Web Browser")
   (princ "\n=======================================================\n")
   (princ)
@@ -450,60 +495,93 @@ app.get('/api/rebar/plugin/autocad.lsp', (req, res) => {
   (princ)
 )
 
-;;; ตัวแปรหน่วยความจำเซสชัน: กลุ่มและชื่อโครงสร้างที่เคยใช้ใน Drawing นี้
-(if (null *rebar-groups*)  (setq *rebar-groups*  (list "ฐานรากทั่วไป" "งานเสา" "งานคาน" "งานพื้น" "งานผนัง")))
-(if (null *rebar-members*) (setq *rebar-members* (list "เสา C1" "เสา C2" "คาน B1" "คาน B2" "ฐานราก F1" "พื้น S1")))
+;;; ตัวแปรเก็บหมวดและชิ้นส่วนที่มีอยู่ในระบบ (ดึงมาจากฐานข้อมูลจริง)
+(setq *rebar-groups*  (list ${groupsLsp}))
+(setq *rebar-members* (list ${membersLsp}))
 
-;;; --- ฟังก์ชันเลือกจากรายการหรือพิมพ์ใหม่ (รองรับ Dynamic Input คลิกลูกศรลงได้ 100%) ---
-(defun rebar-pick-or-new (lst prompt-title / i kwStr promptStr ans chosen new-val)
-  (princ "\n----------------------------------------")
-  (princ (strcat "\n--- " prompt-title " ---"))
-  (setq i 1)
-  (setq kwStr "0 O New")
-  (foreach item lst
-    (princ (strcat "\n  [" (itoa i) "] " item))
-    (setq kwStr (strcat kwStr " " (itoa i)))
-    (setq i (1+ i))
-  )
-  (princ "\n  [0] พิมพ์ชื่อใหม่ (กด [0] หรือ [O])")
-  (princ "\n----------------------------------------")
-
-  ;; ตั้งค่า Keyword ให้ Dynamic Input สามารถกดคลิกลูกศรลง (Down Arrow) เลือกได้
-  (initget kwStr)
-  (setq promptStr (strcat "\nเลือก [1-" (itoa (length lst)) " หรือ 0=พิมพ์ใหม่] <1>: "))
-  (setq ans (getkword promptStr))
-
-  ;; ถ้ากด Enter ให้เลือกรายการแรกเป็นค่าเริ่มต้น
-  (if (null ans) (setq ans "1"))
-
-  (if (or (= ans "0") (= (strcase ans) "O") (= (strcase ans) "NEW"))
+;;; ฟังก์ชันช่วยดึงหมวดและชิ้นส่วนล่าสุดจากระบบแบบ Real-Time ก่อนเริ่มคำสั่ง
+(defun rebar-fetch-latest-metadata (/ http url res lines line parts gList mList)
+  (setq http (vlax-create-object "MSXML2.ServerXMLHTTP.6.0"))
+  (if (null http) (setq http (vlax-create-object "MSXML2.XMLHTTP")))
+  (if (null http) (setq http (vlax-create-object "WinHttp.WinHttpRequest.5.1")))
+  (if http
     (progn
-      (setq new-val "")
-      ;; วนลูปถามจนกว่าผู้ใช้จะพิมพ์ข้อความจริง ป้องกันปัญหากด Enter แล้วข้อความหาย
-      (while (= new-val "")
-        (setq new-val (getstring T (strcat "\nพิมพ์" prompt-title "ใหม่: ")))
-        (setq new-val (vl-string-trim " \t\r\n" new-val))
-        (if (= new-val "")
-          (princ "\n[!] กรุณาพิมพ์ชื่อ (ห้ามเว้นว่าง): ")
+      (setq url "${baseUrl}/api/rebar/metadata.txt")
+      (vlax-invoke-method http 'open "GET" url :vlax-false)
+      (setq err (vl-catch-all-apply 'vlax-invoke-method (list http 'send)))
+      (if (not (vl-catch-all-error-p err))
+        (progn
+          (setq res (vlax-get-property http 'responseText))
+          (if (and res (/= res "") (/= res "ERROR"))
+            (progn
+              (setq lines (rebar-str-split "\n" res))
+              (foreach line lines
+                (if (wcmatch line "GROUPS:*")
+                  (progn
+                    (setq parts (rebar-str-split "|" (substr line 8)))
+                    (if parts (setq *rebar-groups* parts))
+                  )
+                )
+                (if (wcmatch line "MEMBERS:*")
+                  (progn
+                    (setq parts (rebar-str-split "|" (substr line 9)))
+                    (if parts (setq *rebar-members* parts))
+                  )
+                )
+              )
+            )
+          )
         )
       )
-      (setq chosen new-val)
+      (vlax-release-object http)
     )
+  )
+)
+
+;;; --- ฟังก์ชันเลือกจากระบบ หรือพิมพ์ชื่อใหม่ (รับประกันความต่อเนื่อง 100% ไม่หลุด ไม่ข้าม) ---
+(defun rebar-select-or-new (lst title / i item ans num chosen)
+  (princ "\n=======================================================")
+  (princ (strcat "\n--- " title " (ที่มีอยู่ในระบบปัจจุบัน) ---"))
+  (setq i 1)
+  (foreach item lst
+    (princ (strcat "\n  [" (itoa i) "] " item))
+    (setq i (1+ i))
+  )
+  (princ "\n=======================================================")
+
+  (setq ans "")
+  (while (= ans "")
+    (setq ans (getstring T (strcat "\nเลือกหมายเลข [1-" (itoa (length lst)) "] หรือพิมพ์ชื่อใหม่: ")))
+    (setq ans (vl-string-trim " \t\r\n" ans))
+    (if (= ans "")
+      (princ "\n[!] กรุณาเลือกหมายเลข หรือพิมพ์ชื่อ (ห้ามเว้นว่าง): ")
+    )
+  )
+
+  (setq num (atoi ans))
+  ;; ถ้าผู้ใช้พิมพ์ตัวเลขที่ตรงกับรายการ ให้ดึงชื่อจากระบบ
+  (if (and (> num 0) (<= num (length lst)) (numberp (read ans)))
     (progn
-      (setq chosen (nth (1- (atoi ans)) lst))
+      (setq chosen (nth (1- num) lst))
+      (princ (strcat "\n[✓ เลือกหมวดเดิมในระบบ]: " chosen))
+    )
+    ;; ถ้าพิมพ์ข้อความ ให้บันทึกเป็นชื่อใหม่ทันที
+    (progn
+      (setq chosen ans)
+      (princ (strcat "\n[✓ เพิ่มชื่อใหม่]: " chosen))
     )
   )
   chosen
 )
 
 ;;; =========================================================================
-;;; คำสั่งหลัก REBAR_SYNC: ถอดเหล็กเส้น 6 ขั้นตอนตามลำดับเดิม ซิงก์ขึ้นเว็บ Real-Time
+;;; คำสั่งหลัก: REBAR_SYNC (6 ขั้นตอนตามลำดับเดิม ต่อเนื่องสมบูรณ์ 100%)
 ;;; =========================================================================
 (defun c:REBAR_SYNC (/ olderr grp member barIdx bartype stdIdx stdlen cut qty useOffcut offcutId http payload url res err)
   (setq olderr *error*)
   (defun *error* (msg)
     (if (and msg (/= msg "Function cancelled") (/= msg "quit / exit abort"))
-      (princ (strcat "\n[แจ้งเตือนระบบ]: " msg))
+      (princ (strcat "\n[แจ้งเตือน]: " msg))
     )
     (princ "\n[ยกเลิกคำสั่ง REBAR_SYNC เรียบร้อย]")
     (setq *error* olderr)
@@ -511,35 +589,39 @@ app.get('/api/rebar/plugin/autocad.lsp', (req, res) => {
   )
 
   (princ "\n=======================================================")
-  (princ "\n  ระบบบันทึกถอดเหล็กเส้น (BBS) v2.5 - ยุทธการ คำกลอน")
+  (princ "\n  ระบบบันทึกถอดเหล็กเส้น (BBS) v3.0 - ยุทธการ คำกลอน")
   (princ "\n=======================================================")
 
-  ;;; ขั้น 1: เลือกกลุ่ม/หมวดงาน หรือพิมพ์ชื่อใหม่
-  (setq grp (rebar-pick-or-new *rebar-groups* "กลุ่ม/หมวดงาน (เช่น ฐานรากF1, เสาC1)"))
+  ;; ดึงข้อมูลหมวดและชิ้นส่วนล่าสุดจากระบบก่อน
+  (rebar-fetch-latest-metadata)
+
+  ;;; ขั้น 1: เลือกกลุ่ม/หมวดงานที่มีในระบบ หรือพิมพ์ชื่อใหม่ได้
+  (setq grp (rebar-select-or-new *rebar-groups* "ขั้นที่ 1: กลุ่ม / หมวดงาน"))
   (if (not (member grp *rebar-groups*))
     (setq *rebar-groups* (append *rebar-groups* (list grp)))
   )
-  (princ (strcat "\n[✓] กลุ่ม/หมวดงาน: " grp))
 
-  ;;; ขั้น 2: ระบุชื่อส่วนโครงสร้าง หรือพิมพ์ชื่อใหม่
-  (setq member (rebar-pick-or-new *rebar-members* "ชื่อส่วนโครงสร้าง (เช่น เสาC1, คานB1, ฐานรากF1)"))
+  ;;; ขั้น 2: ระบุชื่อส่วนโครงสร้างที่มีในระบบ หรือพิมพ์ชื่อใหม่ได้
+  (setq member (rebar-select-or-new *rebar-members* "ขั้นที่ 2: ชื่อส่วนโครงสร้าง"))
   (if (not (member member *rebar-members*))
     (setq *rebar-members* (append *rebar-members* (list member)))
   )
-  (princ (strcat "\n[✓] ชิ้นส่วนโครงสร้าง: " member))
 
-  ;;; ขั้น 3: เลือกขนาดเหล็ก (มอก.24-2559 + เหล็กบีม มอก.1227-2558 หรือคลังเศษ)
-  (princ "\n-------------------------------------------------------")
+  ;;; ขั้น 3: เลือกขนาดเหล็ก (มอก. + เหล็กบีม H-Beam หรือคลังเศษ)
+  (princ "\n=======================================================")
   (princ "\n--- ขั้นที่ 3: เลือกขนาดเหล็ก (มอก. + เหล็กบีม) ---")
   (princ "\n  เหล็กกลมผิวเรียบ (RB):  [1]=RB6   [2]=RB9   [3]=RB10  [4]=RB12")
   (princ "\n  เหล็กข้ออ้อย (DB):      [5]=DB10  [6]=DB12  [7]=DB16  [8]=DB20  [9]=DB25  [10]=DB28  [11]=DB32  [12]=DB40")
   (princ "\n  เหล็กบีม H-Beam มอก.:   [13]=H-100x50 [14]=H-100x100 [15]=H-125x125 [16]=H-150x75 [17]=H-150x150 [18]=H-200x100 [19]=H-200x200 [20]=H-250x250 [21]=H-300x300")
   (princ "\n  คลังเศษเหล็กสะสม:       [99]=เลือกดึงเศษในระบบมาใช้")
-  (princ "\n-------------------------------------------------------")
+  (princ "\n=======================================================")
 
-  (initget "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 99 RB6 RB9 RB10 RB12 DB10 DB12 DB16 DB20 DB25 DB28 DB32 DB40")
-  (setq barIdx (getkword "\nเลือกขนาดเหล็ก [1-21 หรือ 99=ดึงเศษ] <8=DB20>: "))
-  (if (null barIdx) (setq barIdx "8"))
+  (setq barIdx "")
+  (while (= barIdx "")
+    (setq barIdx (getstring T "\nเลือกหมายเลข [1-21 หรือ 99] หรือพิมพ์ขนาด (เช่น DB20, RB9) <DB20>: "))
+    (setq barIdx (vl-string-trim " \t\r\n" barIdx))
+    (if (= barIdx "") (setq barIdx "DB20"))
+  )
 
   (setq useOffcut "false")
   (setq offcutId "")
@@ -583,13 +665,16 @@ app.get('/api/rebar/plugin/autocad.lsp', (req, res) => {
   ;;; ขั้น 4: เลือกความยาวมาตรฐานที่นำมาตัด (6m, 10m, 12m)
   (if (= useOffcut "false")
     (progn
-      (princ "\n-------------------------------------------------------")
-      (princ "\n--- ขั้นที่ 4: ความยาวเหล็กมาตรฐานที่เลือกมาตัด ---")
-      (princ "\n  [1] 6.0 เมตร   [2] 10.0 เมตร   [3] 12.0 เมตร   [0] กำหนดความยาวเอง")
-      (princ "\n-------------------------------------------------------")
-      (initget "1 2 3 0 6 10 12")
-      (setq stdIdx (getkword "\nเลือกความยาวมาตรฐาน [1=6m/2=10m/3=12m/0=กำหนดเอง] <3>: "))
-      (if (null stdIdx) (setq stdIdx "3"))
+      (princ "\n=======================================================")
+      (princ "\n--- ขั้นที่ 4: ความยาวเหล็กมาตรฐานที่นำมาตัด ---")
+      (princ "\n  [1] 6.0 เมตร   [2] 10.0 เมตร   [3] 12.0 เมตร   [0] กำหนดเอง")
+      (princ "\n=======================================================")
+      (setq stdIdx "")
+      (while (= stdIdx "")
+        (setq stdIdx (getstring T "\nเลือกความยาวมาตรฐาน [1=6m / 2=10m / 3=12m / 0=กำหนดเอง] <3>: "))
+        (setq stdIdx (vl-string-trim " \t\r\n" stdIdx))
+        (if (= stdIdx "") (setq stdIdx "3"))
+      )
       (cond
         ((or (= stdIdx "1") (= stdIdx "6"))  (setq stdlen 6.0))
         ((or (= stdIdx "2") (= stdIdx "10")) (setq stdlen 10.0))
@@ -605,19 +690,25 @@ app.get('/api/rebar/plugin/autocad.lsp', (req, res) => {
   )
 
   ;;; ขั้น 5: ระบุความยาวที่ตัดใช้งานจริง (พิมพ์ตัวเลข หรือคลิก 2 จุดวัดในแบบ)
-  (princ "\n-------------------------------------------------------")
+  (princ "\n=======================================================")
   (princ "\n--- ขั้นที่ 5: ความยาวที่ตัดใช้งานจริง ---")
-  (initget 4)
-  (setq cut (getdist "\nระบุความยาวตัดใช้งานจริง (ม.) หรือคลิกวัด 2 จุดในแบบ <6.0>: "))
-  (if (or (null cut) (<= cut 0)) (setq cut 6.0))
+  (setq cut nil)
+  (while (or (null cut) (<= cut 0))
+    (setq cut (getdist "\nระบุความยาวตัดใช้งานจริง (ม.) หรือคลิกวัด 2 จุดในแบบ <6.0>: "))
+    (if (null cut) (setq cut 6.0))
+    (if (<= cut 0) (princ "\n[!] ความยาวต้องมากกว่า 0"))
+  )
   (princ (strcat "\n[✓] ความยาวตัดใช้งานจริง: " (rtos cut 2 2) " ม."))
 
   ;;; ขั้น 6: ระบุจำนวนท่อนที่ต้องการตัด
-  (princ "\n-------------------------------------------------------")
+  (princ "\n=======================================================")
   (princ "\n--- ขั้นที่ 6: จำนวนท่อนที่ต้องการตัด ---")
-  (initget 6)
-  (setq qty (getint "\nระบุจำนวนท่อนที่ต้องการตัด (ท่อน) <1>: "))
-  (if (or (null qty) (<= qty 0)) (setq qty 1))
+  (setq qty nil)
+  (while (or (null qty) (<= qty 0))
+    (setq qty (getint "\nระบุจำนวนท่อนที่ต้องการตัด (ท่อน) <1>: "))
+    (if (null qty) (setq qty 1))
+    (if (<= qty 0) (princ "\n[!] จำนวนต้องมากกว่า 0"))
+  )
   (princ (strcat "\n[✓] จำนวนท่อนที่ตัด: " (itoa qty) " ท่อน"))
 
   ;;; เตรียมข้อมูล JSON ส่งขึ้นระบบ Cloud Real-Time
@@ -748,7 +839,7 @@ app.get('/api/rebar/plugin/autocad.lsp', (req, res) => {
   (princ)
 )
 
-(princ "\n[สำเร็จ] โหลดปลั๊กอิน Yutthakan Rebar Sync v2.5 เรียบร้อย! พิมพ์ REBAR_SYNC เพื่อเริ่มใช้งาน หรือพิมพ์ REBAR_HELP เพื่อดูคำสั่ง")
+(princ "\n[สำเร็จ] โหลดปลั๊กอิน Yutthakan Rebar Sync v3.0 เรียบร้อย! พิมพ์ REBAR_SYNC เพื่อเริ่มใช้งาน")
 (princ)
 `;
 
