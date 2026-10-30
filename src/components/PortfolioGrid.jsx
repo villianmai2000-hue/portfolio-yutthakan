@@ -1,13 +1,21 @@
 import React, { useState, useMemo } from 'react';
 import { Search, Filter, Layers, ExternalLink, Calendar, MapPin, FileDown, Eye, Image as ImageIcon } from 'lucide-react';
 
+const ARCH_BLUEPRINT_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="800" height="500"><rect width="800" height="500" fill="%230f172a"/><g stroke="%2338bdf8" stroke-width="1.2" stroke-opacity="0.25" fill="none"><path d="M0 0 L800 500 M800 0 L0 500 M0 250 L800 250 M400 0 L400 500 M200 0 L200 500 M600 0 L600 500"/></g><rect x="250" y="160" width="300" height="180" rx="16" fill="%231e293b" stroke="%2310b981" stroke-width="2.5"/><text x="400" y="240" text-anchor="middle" fill="%23f8fafc" font-size="22" font-family="sans-serif" font-weight="bold">เอกสารแบบแปลน &amp; PDF</text><text x="400" y="280" text-anchor="middle" fill="%2334d399" font-size="14" font-family="sans-serif">AutoCAD / Architectural Plan</text></svg>`;
+
 function resolveProjectImage(img) {
   if (!img) return '';
-  if (typeof img === 'string') return img;
-  if (typeof img === 'object') {
-    return img.dataUrl || img.url || img.src || '';
+  let str = '';
+  if (typeof img === 'string') {
+    str = img.trim();
+  } else if (typeof img === 'object') {
+    str = (img.dataUrl || img.url || img.src || img.thumbnailDataUrl || img.preview || img.base64 || img.image || '').trim();
   }
-  return '';
+  if (!str || str === '[object Object]' || str === 'undefined' || str === 'null') return '';
+  if (str.startsWith('data:application/pdf') || str.toLowerCase().endsWith('.pdf')) {
+    return ARCH_BLUEPRINT_SVG;
+  }
+  return str;
 }
 
 export default function PortfolioGrid({ projects = [], categories = [], onSelectProject }) {
