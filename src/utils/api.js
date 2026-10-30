@@ -72,6 +72,7 @@ export const api = {
   getAutoCADPluginUrl: () => `${BASE_URL}/rebar/plugin/autocad.lsp`,
   getSketchUpPluginUrl: () => `${BASE_URL}/rebar/plugin/sketchup.rb`,
   getRebarCsvUrl: () => `${BASE_URL}/rebar/export/bbs.csv`,
+  getRebarXlsxUrl: () => `${BASE_URL}/rebar/export/bbs.xlsx`,
 
   // Rebar Offcut Inventory & Reuse Management
   getRebarOffcuts: () => request('/rebar/offcuts'),

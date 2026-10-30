@@ -1071,11 +1071,11 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                         <Download className="w-3.5 h-3.5" /> โหลดปลั๊กอิน SketchUp (.rb)
                       </a>
                       <a
-                        href={api.getRebarCsvUrl()}
-                        download="rebar_bbs.csv"
+                        href={api.getRebarXlsxUrl()}
+                        download
                         className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow"
                       >
-                        <FileSpreadsheet className="w-3.5 h-3.5" /> Export Excel/CSV
+                        <FileSpreadsheet className="w-3.5 h-3.5" /> ส่งออก Excel (.xlsx)
                       </a>
                     </div>
                   </div>

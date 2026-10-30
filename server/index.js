@@ -7,6 +7,9 @@ import { fileURLToPath } from 'url';
 import { DataService, connectDB, DEFAULT_OWNER } from './db.js';
 import { loginHandler, requestOtpHandler, verifyOtpAndResetHandler, requireAdmin } from './auth.js';
 import jwt from 'jsonwebtoken';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const XLSX = require('xlsx');
 
 dotenv.config();
 
@@ -753,11 +756,183 @@ end
   res.send(rbContent);
 });
 
-// Export CSV for Excel, BOQ, or AutoCAD DataLink
+// ========================================================
+// Export Excel (XLSX) – ตารางสรุปถอดเหล็กเส้น BBS ครบสมบูรณ์
+// ========================================================
+app.get('/api/rebar/export/bbs.xlsx', async (req, res) => {
+  try {
+    const items = await DataService.getRebarItems();
+
+    // ── Helper ──
+    const n = (v, d = 2) => parseFloat((+v || 0).toFixed(d));
+    const pct = (v) => `${n(v, 1)}%`;
+
+    // ── Sheet 1: รายการถอดเหล็กทั้งหมด ──
+    const detailHeaders = [
+      'ลำดับ', 'หมวด / กลุ่ม', 'ชื่อชิ้นส่วนโครงสร้าง', 'ชนิดเหล็ก (มอก.)',
+      'ขนาดเหล็ก', 'ความยาวมาตรฐาน (ม.)', 'ความยาวตัดใช้ (ม.)',
+      'จำนวนที่ต้องการ (ท่อน)', 'ได้ท่อน/เส้น', 'สั่งเส้นเต็ม (เส้น)',
+      'เศษเหลือ/เส้น (ม.)', 'รวมความยาวตัดจริง (ม.)', 'รวมเศษเหลือ (ม.)',
+      'น้ำหนักต่อเมตร (กก./ม.)', 'น้ำหนักรวม (กก.)', '% เศษสูญเสีย'
+    ];
+
+    const detailRows = items.map((it, i) => [
+      i + 1,
+      it.group || it.category || '-',
+      it.label || it.member || '-',
+      it.steelType || (((it.rebarType || it.barType || '').startsWith('H-') || (it.rebarType || it.barType || '').startsWith('WF')) ? 'เหล็กบีม (มอก.1227)' : ((it.rebarType || it.barType || '').startsWith('RB') ? 'เหล็กกลม (มอก.20)' : 'เหล็กข้ออ้อย (มอก.24)')),
+      it.rebarType || it.barType || '-',
+      n(it.standardLength || 12),
+      n(it.cutLength || 0),
+      it.quantity || 1,
+      it.piecesPerBar || it.piecesPerStandardBar || 1,
+      it.standardBarsNeeded !== undefined ? it.standardBarsNeeded : (it.barsNeeded || 0),
+      n(it.offcutPerBar || 0),
+      n(it.totalCutLength || 0),
+      n(it.totalScrapLength !== undefined ? it.totalScrapLength : (it.totalOffcutLength || 0)),
+      n(it.unitWeight || it.weightPerMeter || 2.47),
+      n(it.totalWeightKg !== undefined ? it.totalWeightKg : (it.weightKg || 0)),
+      pct(it.scrapPercent !== undefined ? it.scrapPercent : (it.wastePercent || 0))
+    ]);
+
+    const ws1 = XLSX.utils.aoa_to_sheet([detailHeaders, ...detailRows]);
+
+    // กำหนดความกว้างคอลัมน์ sheet 1
+    ws1['!cols'] = [
+      { wch: 6 }, { wch: 18 }, { wch: 28 }, { wch: 22 }, { wch: 12 },
+      { wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 14 }, { wch: 20 },
+      { wch: 18 }, { wch: 22 }, { wch: 18 }, { wch: 22 }, { wch: 18 }, { wch: 16 }
+    ];
+
+    // ── Sheet 2: ตารางสรุป (แยกขนาดเหล็ก) ──
+    // จัดกลุ่มตามขนาดเหล็ก
+    const summaryMap = {};
+    items.forEach(it => {
+      const type = it.rebarType || it.barType || 'DB20';
+      if (!summaryMap[type]) {
+        summaryMap[type] = { type, bars6: 0, bars10: 0, bars12: 0, totalBars: 0, totalCutLength: 0, totalWeight: 0 };
+      }
+      const stdLen = +(it.standardLength || 12);
+      const bars = it.standardBarsNeeded !== undefined ? +it.standardBarsNeeded : +(it.barsNeeded || 0);
+      if (stdLen <= 6) summaryMap[type].bars6 += bars;
+      else if (stdLen <= 10) summaryMap[type].bars10 += bars;
+      else summaryMap[type].bars12 += bars;
+      summaryMap[type].totalBars += bars;
+      summaryMap[type].totalCutLength += +(it.totalCutLength || 0);
+      summaryMap[type].totalWeight += +(it.totalWeightKg !== undefined ? it.totalWeightKg : (it.weightKg || 0));
+    });
+
+    const summaryHeaders = [
+      'ขนาดเหล็ก (มอก.)', 'เส้น 6.0 ม.', 'เส้น 10.0 ม.', 'เส้น 12.0 ม.',
+      'รวมจำนวนเส้น', 'ความยาวตัดจริง (ม.)', 'น้ำหนักรวม (กก.)', 'น้ำหนักรวม (ตัน)'
+    ];
+
+    // เรียงขนาดเหล็ก: RB < DB < H-Beam
+    const sortedTypes = Object.keys(summaryMap).sort((a, b) => {
+      const rank = (t) => t.startsWith('RB') ? 0 : t.startsWith('DB') ? 1 : 2;
+      if (rank(a) !== rank(b)) return rank(a) - rank(b);
+      const num = (t) => parseFloat(t.replace(/[^0-9.]/g, '')) || 0;
+      return num(a) - num(b);
+    });
+
+    const summaryRows = sortedTypes.map(type => {
+      const s = summaryMap[type];
+      return [
+        type,
+        s.bars6 || '-',
+        s.bars10 || '-',
+        s.bars12 || '-',
+        s.totalBars,
+        n(s.totalCutLength),
+        n(s.totalWeight),
+        n(s.totalWeight / 1000, 3)
+      ];
+    });
+
+    // แถวรวมทั้งหมด
+    const totalBars = Object.values(summaryMap).reduce((a, s) => a + s.totalBars, 0);
+    const totalCutLen = Object.values(summaryMap).reduce((a, s) => a + s.totalCutLength, 0);
+    const totalWeight = Object.values(summaryMap).reduce((a, s) => a + s.totalWeight, 0);
+    const summaryTotalRow = ['รวมทั้งหมดทั้งโครงการ', '-', '-', '-', totalBars, n(totalCutLen), n(totalWeight), n(totalWeight / 1000, 3)];
+
+    const ws2 = XLSX.utils.aoa_to_sheet([
+      ['ตารางสรุปรวมทั้งโครงการ (GRAND TOTAL – ทุกหมวดหมู่)'],
+      [`ส่งออกเมื่อ: ${new Date().toLocaleString('th-TH')}`],
+      [],
+      summaryHeaders,
+      ...summaryRows,
+      [],
+      summaryTotalRow
+    ]);
+
+    ws2['!cols'] = [
+      { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
+      { wch: 16 }, { wch: 22 }, { wch: 18 }, { wch: 16 }
+    ];
+
+    // ── Sheet 3: ตารางสรุปรายหมวด ──
+    const groupMap = {};
+    items.forEach(it => {
+      const grp = it.group || it.category || 'ไม่ระบุหมวด';
+      if (!groupMap[grp]) groupMap[grp] = [];
+      groupMap[grp].push(it);
+    });
+
+    const ws3Rows = [
+      ['ตารางสรุปแยกหมวด / กลุ่มโครงสร้าง'],
+      [`ส่งออกเมื่อ: ${new Date().toLocaleString('th-TH')}`],
+      []
+    ];
+
+    Object.entries(groupMap).forEach(([grp, grpItems]) => {
+      ws3Rows.push([`【 ${grp} 】`, '', '', '', '', '', '', '']);
+      ws3Rows.push(['ขนาดเหล็ก', 'จำนวนเส้น', 'ความยาวรวม (ม.)', 'น้ำหนักรวม (กก.)', 'น้ำหนักรวม (ตัน)', '', '', '']);
+
+      // จัดกลุ่มตามขนาดใน group
+      const subMap = {};
+      grpItems.forEach(it => {
+        const type = it.rebarType || it.barType || 'DB20';
+        if (!subMap[type]) subMap[type] = { bars: 0, len: 0, weight: 0 };
+        const bars = it.standardBarsNeeded !== undefined ? +it.standardBarsNeeded : +(it.barsNeeded || 0);
+        subMap[type].bars += bars;
+        subMap[type].len += +(it.totalCutLength || 0);
+        subMap[type].weight += +(it.totalWeightKg !== undefined ? it.totalWeightKg : (it.weightKg || 0));
+      });
+
+      Object.entries(subMap).forEach(([type, s]) => {
+        ws3Rows.push([type, s.bars, n(s.len), n(s.weight), n(s.weight / 1000, 3), '', '', '']);
+      });
+      ws3Rows.push(['', '', '', '', '', '', '', '']);
+    });
+
+    const ws3 = XLSX.utils.aoa_to_sheet(ws3Rows);
+    ws3['!cols'] = [
+      { wch: 22 }, { wch: 14 }, { wch: 20 }, { wch: 18 }, { wch: 16 }, { wch: 8 }, { wch: 8 }, { wch: 8 }
+    ];
+
+    // ── สร้าง Workbook ──
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws1, 'รายการถอดเหล็กทั้งหมด');
+    XLSX.utils.book_append_sheet(wb, ws2, 'สรุปรวม GRAND TOTAL');
+    XLSX.utils.book_append_sheet(wb, ws3, 'สรุปแยกหมวด');
+
+    const xlsxBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const fileName = `รายการถอดเหล็ก_BBS_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    res.send(xlsxBuffer);
+  } catch (err) {
+    console.error('[Export XLSX Error]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Export CSV (legacy – ยังคงไว้เพื่อ AutoCAD DataLink)
 app.get('/api/rebar/export/bbs.csv', async (req, res) => {
   try {
     const items = await DataService.getRebarItems();
-    let csv = 'ลำดับ,ชิ้นส่วนโครงสร้าง,ขนาดเหล็ก,ความยาวมาตรฐาน (ม.),ความยาวตัด (ม.),จำนวน (ท่อน),ได้ท่อน/เส้น,สั่งเส้นเต็ม (เส้น),เศษเหลือ/เส้น (ม.),รวมความยาวตัด (ม.),รวมเศษเหลือ (ม.),น้ำหนักต่อเมตร (กก./ม.),น้ำหนักรวม (กก.),% เศษสูญเสีย,เศษนำไปใช้ที่ไหน\n';
+    let csv = 'ลำดับ,ชิ้นส่วนโครงสร้าง,ขนาดเหล็ก,ความยาวมาตรฐาน (ม.),ความยาวตัด (ม.),จำนวน (ท่อน),ได้ท่อน/เส้น,สั่งเส้นเต็ม (เส้น),เศษเหลือ/เส้น (ม.),รวมความยาวตัด (ม.),รวมเศษเหลือ (ม.),น้ำหนักต่อเมตร (กก./ม.),น้ำหนักรวม (กก.),% เศษสูญเสีย\n';
     items.forEach((it, idx) => {
       const label = it.label || it.member || '-';
       const type = it.rebarType || it.barType || 'DB20';
@@ -772,9 +947,7 @@ app.get('/api/rebar/export/bbs.csv', async (req, res) => {
       const unitW = it.unitWeight || it.weightPerMeter || 2.47;
       const totalW = it.totalWeightKg !== undefined ? it.totalWeightKg : (it.weightKg || 0);
       const waste = it.scrapPercent !== undefined ? it.scrapPercent : (it.wastePercent || 0);
-      const usedFor = it.usedFor || it.note || '';
-
-      csv += `${idx + 1},"${label}","${type}",${stdLen},${cutLen},${qty},${pieces},${bars},${offcut},${totalCut},${totalOffcut},${unitW},${totalW},${waste}%,"${usedFor}"\n`;
+      csv += `${idx + 1},"${label}","${type}",${stdLen},${cutLen},${qty},${pieces},${bars},${offcut},${totalCut},${totalOffcut},${unitW},${totalW},${waste}%\n`;
     });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="rebar_bbs_${Date.now()}.csv"`);
