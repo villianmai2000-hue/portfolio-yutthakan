@@ -13,7 +13,50 @@ import {
 import { api } from '../utils/api.js';
 import { compressUltraCompact, formatBytes } from '../utils/compressor.js';
 
-// มาตรฐานน้ำหนักเหล็กเส้นเสริมคอนกรีต (มอก. 24-2559) และเหล็กรูปพรรณรีดร้อน/เหล็กบีม (มอก. 1227-2558) กก./ม.
+// ตารางมาตรฐานเหล็กโครงสร้างรูปพรรณรีดร้อน H-BEAMS (มอก. 1227-2558 / TIS STANDARD)
+export const H_BEAM_STANDARDS_TIS = [
+  { size: '100x50', label: 'H-100x50', weight: 9.30, H: 100, B: 50, t1: 5.0, t2: 7, r: 8, area: 11.85, Ix: 187, Iy: 14.8, Zx: 37.5, Zy: 5.91 },
+  { size: '100x100', label: 'H-100x100', weight: 17.2, H: 100, B: 100, t1: 6.0, t2: 8, r: 10, area: 21.90, Ix: 383, Iy: 134, Zx: 77, Zy: 27 },
+  { size: '125x125', label: 'H-125x125', weight: 23.8, H: 125, B: 125, t1: 6.5, t2: 9, r: 10, area: 30.31, Ix: 847, Iy: 293, Zx: 136, Zy: 47 },
+  { size: '150x75', label: 'H-150x75', weight: 14.0, H: 150, B: 75, t1: 5.0, t2: 7, r: 8, area: 17.85, Ix: 666, Iy: 50, Zx: 89, Zy: 13 },
+  { size: '150x100', label: 'H-150x100', weight: 21.1, H: 148, B: 100, t1: 6.0, t2: 9, r: 11, area: 26.84, Ix: 1020, Iy: 151, Zx: 138, Zy: 30 },
+  { size: '150x150', label: 'H-150x150', weight: 31.5, H: 150, B: 150, t1: 7.0, t2: 10, r: 11, area: 40.14, Ix: 1640, Iy: 563, Zx: 219, Zy: 75 },
+  { size: '175x90', label: 'H-175x90', weight: 18.1, H: 175, B: 90, t1: 5.0, t2: 8, r: 9, area: 23.04, Ix: 1210, Iy: 97.5, Zx: 139, Zy: 21.7 },
+  { size: '175x175', label: 'H-175x175', weight: 40.2, H: 175, B: 175, t1: 7.5, t2: 11, r: 12, area: 51.21, Ix: 2880, Iy: 984, Zx: 330, Zy: 112 },
+  { size: '200x100 (18.2k)', label: 'H-200x100 (18.2k)', weight: 18.2, H: 198, B: 99, t1: 4.5, t2: 7, r: 11, area: 23.18, Ix: 1580, Iy: 114, Zx: 160, Zy: 23 },
+  { size: '200x100', label: 'H-200x100', weight: 21.3, H: 200, B: 100, t1: 5.5, t2: 8, r: 11, area: 27.16, Ix: 1840, Iy: 134, Zx: 184, Zy: 27 },
+  { size: '200x150', label: 'H-200x150', weight: 30.6, H: 194, B: 150, t1: 6.0, t2: 9, r: 13, area: 39.01, Ix: 2690, Iy: 507, Zx: 277, Zy: 68 },
+  { size: '200x200', label: 'H-200x200', weight: 49.9, H: 200, B: 200, t1: 8.0, t2: 12, r: 13, area: 63.53, Ix: 4720, Iy: 1600, Zx: 472, Zy: 160 },
+  { size: '200x200 (56.2k)', label: 'H-200x200 (56.2k)', weight: 56.2, H: 200, B: 204, t1: 12.0, t2: 12, r: 13, area: 71.53, Ix: 4980, Iy: 1700, Zx: 498, Zy: 167 },
+  { size: '200x200 (65.7k)', label: 'H-200x200 (65.7k)', weight: 65.7, H: 208, B: 202, t1: 10.0, t2: 16, r: 13, area: 83.69, Ix: 6530, Iy: 2200, Zx: 628, Zy: 218 },
+  { size: '250x125 (25.7k)', label: 'H-250x125 (25.7k)', weight: 25.7, H: 248, B: 124, t1: 5.0, t2: 8, r: 12, area: 32.68, Ix: 3540, Iy: 255, Zx: 285, Zy: 41 },
+  { size: '250x125', label: 'H-250x125', weight: 29.6, H: 250, B: 125, t1: 6.0, t2: 9, r: 12, area: 37.66, Ix: 4050, Iy: 294, Zx: 324, Zy: 47 },
+  { size: '250x175', label: 'H-250x175', weight: 44.1, H: 244, B: 175, t1: 7.0, t2: 11, r: 16, area: 56.24, Ix: 6120, Iy: 984, Zx: 502, Zy: 113 },
+  { size: '250x250 (64.4k)', label: 'H-250x250 (64.4k)', weight: 64.4, H: 244, B: 252, t1: 11.0, t2: 11, r: 16, area: 82.06, Ix: 8790, Iy: 2940, Zx: 720, Zy: 233 },
+  { size: '250x250 (66.5k)', label: 'H-250x250 (66.5k)', weight: 66.5, H: 248, B: 249, t1: 8.0, t2: 13, r: 16, area: 84.70, Ix: 9930, Iy: 3350, Zx: 801, Zy: 269 },
+  { size: '250x250', label: 'H-250x250', weight: 72.4, H: 250, B: 250, t1: 9.0, t2: 14, r: 16, area: 92.18, Ix: 10800, Iy: 3650, Zx: 867, Zy: 292 },
+  { size: '250x250 (82.2k)', label: 'H-250x250 (82.2k)', weight: 82.2, H: 250, B: 255, t1: 14.0, t2: 14, r: 16, area: 104.70, Ix: 11500, Iy: 3880, Zx: 919, Zy: 304 },
+  { size: '300x150 (32k)', label: 'H-300x150 (32k)', weight: 32.0, H: 298, B: 149, t1: 5.5, t2: 8, r: 13, area: 40.80, Ix: 6320, Iy: 442, Zx: 424, Zy: 59 },
+  { size: '300x150', label: 'H-300x150', weight: 36.7, H: 300, B: 150, t1: 6.5, t2: 9, r: 13, area: 46.78, Ix: 7210, Iy: 508, Zx: 481, Zy: 68 },
+  { size: '300x200', label: 'H-300x200', weight: 56.8, H: 294, B: 200, t1: 8.0, t2: 12, r: 18, area: 72.38, Ix: 11300, Iy: 1600, Zx: 771, Zy: 160 },
+  { size: '300x200 (65.4k)', label: 'H-300x200 (65.4k)', weight: 65.4, H: 298, B: 201, t1: 9.0, t2: 14, r: 18, area: 83.36, Ix: 13300, Iy: 1900, Zx: 893, Zy: 189 },
+  { size: '300x300 (84.5k)', label: 'H-300x300 (84.5k)', weight: 84.5, H: 294, B: 302, t1: 12.0, t2: 12, r: 18, area: 107.70, Ix: 16900, Iy: 5520, Zx: 1150, Zy: 365 },
+  { size: '300x300 (87k)', label: 'H-300x300 (87k)', weight: 87.0, H: 298, B: 299, t1: 9.0, t2: 14, r: 18, area: 110.80, Ix: 18800, Iy: 6240, Zx: 1270, Zy: 417 },
+  { size: '300x300', label: 'H-300x300', weight: 94.0, H: 300, B: 300, t1: 10.0, t2: 15, r: 18, area: 119.80, Ix: 20400, Iy: 6750, Zx: 1360, Zy: 450 },
+  { size: '300x300 (106k)', label: 'H-300x300 (106k)', weight: 106.0, H: 300, B: 305, t1: 15.0, t2: 15, r: 18, area: 134.80, Ix: 21500, Iy: 7100, Zx: 1440, Zy: 466 },
+  { size: '350x175 (41.4k)', label: 'H-350x175 (41.4k)', weight: 41.4, H: 346, B: 174, t1: 6.0, t2: 9, r: 14, area: 52.68, Ix: 11100, Iy: 792, Zx: 611, Zy: 91 },
+  { size: '350x175', label: 'H-350x175', weight: 49.6, H: 350, B: 175, t1: 7.0, t2: 11, r: 14, area: 63.14, Ix: 13600, Iy: 984, Zx: 775, Zy: 112 },
+  { size: '350x175 (57.8k)', label: 'H-350x175 (57.8k)', weight: 57.8, H: 354, B: 176, t1: 8.0, t2: 13, r: 14, area: 73.68, Ix: 16100, Iy: 1180, Zx: 909, Zy: 134 },
+  { size: '350x250 (69.2k)', label: 'H-350x250 (69.2k)', weight: 69.2, H: 336, B: 249, t1: 8.0, t2: 12, r: 20, area: 88.15, Ix: 18500, Iy: 3090, Zx: 1100, Zy: 248 },
+  { size: '350x250', label: 'H-350x250', weight: 79.7, H: 340, B: 250, t1: 9.0, t2: 14, r: 20, area: 101.50, Ix: 21700, Iy: 3650, Zx: 1280, Zy: 292 },
+  { size: '350x250 (106k)', label: 'H-350x250 (106k)', weight: 106.0, H: 338, B: 351, t1: 13.0, t2: 13, r: 20, area: 135.30, Ix: 28200, Iy: 9380, Zx: 1670, Zy: 534 },
+  { size: '350x350 (115k)', label: 'H-350x350 (115k)', weight: 115.0, H: 344, B: 348, t1: 10.0, t2: 16, r: 20, area: 146.00, Ix: 33300, Iy: 11200, Zx: 1940, Zy: 646 },
+  { size: '350x350 (131k)', label: 'H-350x350 (131k)', weight: 131.0, H: 344, B: 354, t1: 16.0, t2: 16, r: 20, area: 166.60, Ix: 35300, Iy: 11800, Zx: 2050, Zy: 669 },
+  { size: '350x350', label: 'H-350x350', weight: 137.0, H: 350, B: 350, t1: 12.0, t2: 19, r: 20, area: 173.90, Ix: 40300, Iy: 13600, Zx: 2300, Zy: 776 },
+  { size: '350x350 (156k)', label: 'H-350x350 (156k)', weight: 156.0, H: 350, B: 357, t1: 19.0, t2: 19, r: 20, area: 198.40, Ix: 42800, Iy: 14400, Zx: 2450, Zy: 809 }
+];
+
+// มาตรฐานน้ำหนักเหล็กเส้นเสริมคอนกรีต (มอก. 24-2559) และเหล็กรูปพรรณรีดร้อน/เหล็กบีม H-BEAMS (มอก. 1227-2558) กก./ม.
 const REBAR_WEIGHTS = {
   // เหล็กเส้นกลม (Round Bar)
   RB6: 0.222,
@@ -33,7 +76,47 @@ const REBAR_WEIGHTS = {
   DB32: 6.310,
   DB36: 7.990,
   DB40: 9.865,
-  // เหล็กโครงสร้างรูปพรรณ / เหล็กบีม H-Beam
+  // เหล็กโครงสร้างรูปพรรณรีดร้อน H-BEAMS (มอก. 1227-2558 ตามตารางมาตรฐานสากล)
+  'H-100x50': 9.30,
+  'H-100x100': 17.2,
+  'H-125x125': 23.8,
+  'H-150x75': 14.0,
+  'H-150x100': 21.1,
+  'H-150x150': 31.5,
+  'H-175x90': 18.1,
+  'H-175x175': 40.2,
+  'H-200x100': 21.3,
+  'H-200x100 (18.2k)': 18.2,
+  'H-200x150': 30.6,
+  'H-200x200': 49.9,
+  'H-200x200 (56.2k)': 56.2,
+  'H-200x200 (65.7k)': 65.7,
+  'H-250x125': 29.6,
+  'H-250x125 (25.7k)': 25.7,
+  'H-250x175': 44.1,
+  'H-250x250': 72.4,
+  'H-250x250 (64.4k)': 64.4,
+  'H-250x250 (66.5k)': 66.5,
+  'H-250x250 (82.2k)': 82.2,
+  'H-300x150': 36.7,
+  'H-300x150 (32k)': 32.0,
+  'H-300x200': 56.8,
+  'H-300x200 (65.4k)': 65.4,
+  'H-300x300': 94.0,
+  'H-300x300 (84.5k)': 84.5,
+  'H-300x300 (87k)': 87.0,
+  'H-300x300 (106k)': 106.0,
+  'H-350x175': 49.6,
+  'H-350x175 (41.4k)': 41.4,
+  'H-350x175 (57.8k)': 57.8,
+  'H-350x250': 79.7,
+  'H-350x250 (69.2k)': 69.2,
+  'H-350x250 (106k)': 106.0,
+  'H-350x350': 137.0,
+  'H-350x350 (115k)': 115.0,
+  'H-350x350 (131k)': 131.0,
+  'H-350x350 (156k)': 156.0,
+  // Short code aliases
   HB100: 17.2,
   HB125: 23.8,
   HB150: 31.5,
@@ -41,14 +124,13 @@ const REBAR_WEIGHTS = {
   HB200: 49.9,
   HB250: 72.4,
   HB300: 94.0,
-  // เหล็กบีม I-Beam
+  HB350: 137.0,
   IB100: 14.0,
   IB125: 17.5,
   IB150: 21.1,
   IB175: 24.2,
   IB200: 26.0,
   IB250: 38.3,
-  // Wide Flange
   WF100: 14.0,
   WF150: 14.0,
   WF200: 21.3,
@@ -67,16 +149,19 @@ const getRebarSortRank = (barType) => {
     const n = parseFloat(t.replace('DB', '')) || 0;
     return 100 + n;
   }
-  if (t.startsWith('IB') || t.startsWith('I-')) {
-    const n = parseFloat(t.replace(/[^0-9]/g, '')) || 0;
-    return 1000 + n;
-  }
-  if (t.startsWith('HB') || t.startsWith('H-')) {
-    const n = parseFloat(t.replace(/[^0-9]/g, '')) || 0;
+  if (t.startsWith('H-') || t.startsWith('HB') || t.startsWith('H')) {
+    const m = t.match(/\d+/);
+    const n = m ? parseInt(m[0], 10) : 0;
     return 2000 + n;
   }
+  if (t.startsWith('IB') || t.startsWith('I-') || t.startsWith('I')) {
+    const m = t.match(/\d+/);
+    const n = m ? parseInt(m[0], 10) : 0;
+    return 1000 + n;
+  }
   if (t.startsWith('WF')) {
-    const n = parseFloat(t.replace(/[^0-9]/g, '')) || 0;
+    const m = t.match(/\d+/);
+    const n = m ? parseInt(m[0], 10) : 0;
     return 3000 + n;
   }
   return 5000;
@@ -885,6 +970,17 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     <Recycle className="w-3.5 h-3.5" />
                     <span>2. คลังเศษเหล็กสะสม ({rebarOffcuts.filter(o => o.status === 'available').length})</span>
                   </button>
+                  <button
+                    onClick={() => setRebarSubTab('guide')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
+                      rebarSubTab === 'guide'
+                        ? 'bg-indigo-600 text-white shadow'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    <FileCode2 className="w-3.5 h-3.5" />
+                    <span>3. วิธีใช้งานใน CAD & SketchUp</span>
+                  </button>
                 </div>
               </div>
 
@@ -1655,6 +1751,257 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
 
             </div>
           )}
+
+              {/* Sub-Tab 3: คู่มือและวิธีการนำไปใช้ใน AutoCAD และ SketchUp (ข้อกำหนด 2) */}
+              {rebarSubTab === 'guide' && (
+                <div className="space-y-6 animate-in fade-in duration-200">
+                  
+                  {/* Banner Header */}
+                  <div className="bg-gradient-to-r from-indigo-900 via-slate-900 to-indigo-950 text-white p-6 rounded-3xl border border-indigo-800/40 shadow-xl relative overflow-hidden">
+                    <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-gradient-to-l from-indigo-500/10 to-transparent pointer-events-none" />
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold border border-indigo-500/30 mb-2">
+                          <Sparkles className="w-3.5 h-3.5" /> คู่มือการเชื่อมต่อ Real-Time 2 ทิศทาง
+                        </div>
+                        <h3 className="text-xl font-black text-white">
+                          วิธีนำระบบถอดเหล็กเส้น (BBS) & เหล็กบีม ไปใช้ใน AutoCAD และ SketchUp
+                        </h3>
+                        <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
+                          เชื่อมต่อโปรแกรมเขียนแบบ AutoCAD (.dwg) และโปรแกรม 3D SketchUp (.skp) เข้ากับฐานข้อมูลบนคลาวด์ ซิงก์ข้อมูลสองทิศทางแบบอัตโนมัติภายใน 5 วินาที
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <a
+                          href={api.getAutoCADPluginUrl()}
+                          download="rebar_sync.lsp"
+                          className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg transition-all"
+                        >
+                          <Download className="w-4 h-4" /> โหลดปลั๊กอิน AutoCAD (.lsp)
+                        </a>
+                        <a
+                          href={api.getSketchUpPluginUrl()}
+                          download="rebar_live_sync.rb"
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg transition-all"
+                        >
+                          <Download className="w-4 h-4" /> โหลดปลั๊กอิน SketchUp (.rb)
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 1: AutoCAD Integration */}
+                  <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 flex items-center justify-center font-bold text-lg">
+                        CAD
+                      </div>
+                      <div>
+                        <h4 className="text-base font-bold text-slate-900 dark:text-white">
+                          1. วิธีใช้งานใน AutoCAD (AutoLISP: rebar_sync.lsp)
+                        </h4>
+                        <p className="text-xs text-slate-500">
+                          ส่งข้อมูลจาก AutoCAD ขึ้นเว็บ และสั่งวาดตาราง BBS ลงใน Drawing อัตโนมัติ
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                      <div className="space-y-3">
+                        <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                          <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-rose-600 text-white text-[11px] flex items-center justify-center font-bold">1</span>
+                            <span>ขั้นตอนการโหลดปลั๊กอินเข้า AutoCAD:</span>
+                          </div>
+                          <ol className="list-decimal list-inside space-y-1 text-xs text-slate-600 dark:text-slate-300 pl-1 leading-relaxed">
+                            <li>กดปุ่มสีแดง <b>"โหลดปลั๊กอิน AutoCAD (.lsp)"</b> ด้านบนเพื่อเซฟไฟล์ <code className="bg-slate-200 dark:bg-slate-700 px-1 py-0.5 rounded">rebar_sync.lsp</code></li>
+                            <li>เปิดโปรแกรม AutoCAD แล้วพิมพ์คำสั่ง <kbd className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 rounded font-mono font-bold text-slate-900 dark:text-white">APPLOAD</kbd> แล้วกด Enter</li>
+                            <li>เลือกไฟล์ <code className="bg-slate-200 dark:bg-slate-700 px-1 py-0.5 rounded">rebar_sync.lsp</code> ที่ดาวน์โหลดไว้ แล้วกดปุ่ม <b>Load</b> (หากต้องการให้โหลดทุกครั้งที่เปิด ให้ลากเข้า Startup Suite)</li>
+                            <li>ที่หน้าต่าง Command Line จะขึ้นข้อความ <span className="text-emerald-600 font-bold">[สำเร็จ] โหลดปลั๊กอิน Yutthakan Rebar Sync เรียบร้อย!</span></li>
+                          </ol>
+                        </div>
+
+                        <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                          <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-rose-600 text-white text-[11px] flex items-center justify-center font-bold">2</span>
+                            <span>คำสั่ง REBAR_SYNC (ส่งข้อมูลขึ้นเว็บ):</span>
+                          </div>
+                          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                            พิมพ์คำสั่ง <kbd className="px-1.5 py-0.5 bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 rounded font-mono font-bold">REBAR_SYNC</kbd> ระบบจะถาม 6 ขั้นตอนตามลำดับ:
+                          </p>
+                          <ul className="list-disc list-inside space-y-1 text-xs text-slate-600 dark:text-slate-300 pl-1">
+                            <li><b>ขั้น 1:</b> เลือกกลุ่ม/หมวดงาน (เช่น ฐานราก F1, เสา C1) หรือกด [0] พิมพ์ชื่อใหม่</li>
+                            <li><b>ขั้น 2:</b> ระบุชื่อโครงสร้าง (เช่น เสา C1, คาน B1) หรือกด [0] พิมพ์ใหม่</li>
+                            <li><b>ขั้น 3:</b> เลือกขนาดเหล็ก (RB6-RB12, DB10-DB40, เหล็กบีม หรือ [99] ดึงเศษในคลัง)</li>
+                            <li><b>ขั้น 4:</b> เลือกความยาวมาตรฐานที่นำมาตัด ([1]=6m, [2]=10m, [3]=12m)</li>
+                            <li><b>ขั้น 5:</b> ระบุความยาวที่ตัดใช้งานจริง (เช่น 6.0, 4.5 ม.)</li>
+                            <li><b>ขั้น 6:</b> ระบุจำนวนท่อนที่ต้องการตัด (ท่อน)</li>
+                          </ul>
+                          <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 text-[11px] font-medium border border-emerald-200 dark:border-emerald-800/40">
+                            ✓ ข้อมูลจะส่งเข้าสู่ระบบฐานข้อมูลคลาวด์และแสดงบนหน้าเว็บภายใน 5 วินาทีทันที!
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                          <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-rose-600 text-white text-[11px] flex items-center justify-center font-bold">3</span>
+                            <span>คำสั่ง REBAR_DRAW (วาดตาราง BBS ลงในแบบ):</span>
+                          </div>
+                          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                            พิมพ์คำสั่ง <kbd className="px-1.5 py-0.5 bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 rounded font-mono font-bold">REBAR_DRAW</kbd> แล้วคลิกเมาส์ที่ตำแหน่งที่ต้องการวางตารางใน Drawing
+                          </p>
+                          <ul className="list-disc list-inside space-y-1 text-xs text-slate-600 dark:text-slate-300 pl-1">
+                            <li>AutoCAD จะดึงข้อมูลล่าสุดจากเซิร์ฟเวอร์แบบ Real-Time</li>
+                            <li>วาดเส้นกรอบตาราง (Grid Lines) หัวตาราง และข้อความชิ้นงานให้ครบถ้วน</li>
+                            <li>แสดงคอลัมน์ชื่อชิ้นส่วน ขนาดเหล็ก ความยาวตัด จำนวน เส้นเต็ม เศษเหลือ และน้ำหนักรวม</li>
+                          </ul>
+                        </div>
+
+                        <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                          <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-rose-600 text-white text-[11px] flex items-center justify-center font-bold">4</span>
+                            <span>คำสั่งอื่นๆ ใน AutoCAD:</span>
+                          </div>
+                          <div className="space-y-1.5 text-xs">
+                            <div className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                              <code className="font-bold text-rose-600 font-mono">REBAR_HELP</code>
+                              <span className="text-slate-500">แสดงเมนูคำสั่งช่วยเหลือทั้งหมด</span>
+                            </div>
+                            <div className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                              <code className="font-bold text-rose-600 font-mono">REBAR_WEB</code>
+                              <span className="text-slate-500">เปิดหน้าต่างระบบเว็บจัดการเหล็กเส้น</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 2: SketchUp Integration */}
+                  <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 flex items-center justify-center font-bold text-lg">
+                        SKP
+                      </div>
+                      <div>
+                        <h4 className="text-base font-bold text-slate-900 dark:text-white">
+                          2. วิธีใช้งานใน SketchUp (Ruby Extension: rebar_live_sync.rb)
+                        </h4>
+                        <p className="text-xs text-slate-500">
+                          เปิดหน้าต่าง Live Sync ควบคุมในตัว และสั่งสร้างโมเดล 3D เหล็กเส้นจริงลงโมเดล
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                      <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                        <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
+                          <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[11px] flex items-center justify-center font-bold">1</span>
+                          <span>การติดตั้งปลั๊กอิน SketchUp:</span>
+                        </div>
+                        <ol className="list-decimal list-inside space-y-1 text-xs text-slate-600 dark:text-slate-300 pl-1 leading-relaxed">
+                          <li>กดปุ่มสีฟ้า <b>"โหลดปลั๊กอิน SketchUp (.rb)"</b> ด้านบน</li>
+                          <li>นำไฟล์ <code className="bg-slate-200 dark:bg-slate-700 px-1 py-0.5 rounded">rebar_live_sync.rb</code> ไปวางในโฟลเดอร์ Plugins ของ SketchUp:
+                            <div className="mt-1 p-2 rounded-xl bg-slate-200 dark:bg-slate-900 font-mono text-[10px] select-all break-all text-slate-700 dark:text-slate-300">
+                              %APPDATA%\SketchUp\SketchUp 2024\SketchUp\Plugins
+                            </div>
+                          </li>
+                          <li>หรือเปิดเมนู <b>Window &rarr; Ruby Console</b> แล้วพิมพ์คำสั่ง:
+                            <div className="mt-1 p-2 rounded-xl bg-slate-200 dark:bg-slate-900 font-mono text-[11px] text-blue-600 dark:text-blue-400">
+                              load 'rebar_live_sync.rb'
+                            </div>
+                          </li>
+                        </ol>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                        <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
+                          <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[11px] flex items-center justify-center font-bold">2</span>
+                          <span>การใช้งานเมนูใน SketchUp:</span>
+                        </div>
+                        <ul className="list-disc list-inside space-y-2 text-xs text-slate-600 dark:text-slate-300 pl-1 leading-relaxed">
+                          <li>
+                            <b>เปิดหน้าต่าง Live Sync:</b> ไปที่เมนู <span className="font-bold text-slate-900 dark:text-white">Extensions &rarr; ถอดเหล็กเส้น & Live Sync &rarr; 1. เปิดหน้าต่าง Live Sync BBS</span> เพื่อจัดการ ถอดแบบ และดูตารางสรุปโดยไม่ต้องสลับโปรแกรม
+                          </li>
+                          <li>
+                            <b>สร้างโมเดล 3D อัตโนมัติ:</b> ไปที่เมนู <span className="font-bold text-slate-900 dark:text-white">Extensions &rarr; ถอดเหล็กเส้น & Live Sync &rarr; 2. สร้างโมเดล 3D เหล็กเส้นจริง</span> ระบบจะดึงข้อมูล BBS มาวาดเป็น 3D Cylinder ขนาดเส้นผ่าศูนย์กลางตาม มอก. และความยาวจริงลงในโมเดลทันที
+                          </li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 3: Interactive H-BEAMS TIS 1227-2558 Standard Table */}
+                  <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+                      <div>
+                        <h4 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                          <span>📐 ตารางมาตรฐานเหล็กโครงสร้างรูปพรรณรีดร้อน H-BEAMS (มอก. 1227-2558)</span>
+                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 text-[10px] font-bold">
+                            TIS STANDARD
+                          </span>
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          ขนาดมาตรฐาน H, B, t1, t2, รัศมี r, น้ำหนักต่อเมตร (kg/m) และค่าคุณสมบัติหน้าตัดตามมาตรฐานสากล
+                        </p>
+                      </div>
+
+                      <div className="text-xs text-slate-400">
+                        รวมทั้งหมด <b className="text-slate-800 dark:text-slate-200">{H_BEAM_STANDARDS_TIS.length}</b> ขนาด
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 uppercase tracking-wider font-bold border-b border-slate-200 dark:border-slate-800">
+                          <tr>
+                            <th className="p-2.5">Nominal Size (mm)</th>
+                            <th className="p-2.5 text-right font-black text-amber-600 dark:text-amber-400">Weight (kg/m)</th>
+                            <th className="p-2.5 text-right">H (mm)</th>
+                            <th className="p-2.5 text-right">B (mm)</th>
+                            <th className="p-2.5 text-right">t1 (mm)</th>
+                            <th className="p-2.5 text-right">t2 (mm)</th>
+                            <th className="p-2.5 text-right">r (mm)</th>
+                            <th className="p-2.5 text-right">Area (cm²)</th>
+                            <th className="p-2.5 text-right">Ix (cm⁴)</th>
+                            <th className="p-2.5 text-right">Iy (cm⁴)</th>
+                            <th className="p-2.5 text-right">Zx (cm³)</th>
+                            <th className="p-2.5 text-right">Zy (cm³)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
+                          {H_BEAM_STANDARDS_TIS.map((b, idx) => (
+                            <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                              <td className="p-2.5 font-bold text-slate-900 dark:text-white">
+                                <span className="px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300 font-extrabold border border-amber-200 dark:border-amber-800/60">
+                                  {b.label}
+                                </span>
+                              </td>
+                              <td className="p-2.5 text-right font-black text-amber-600 dark:text-amber-400">
+                                {b.weight.toFixed(2)}
+                              </td>
+                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.H}</td>
+                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.B}</td>
+                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.t1}</td>
+                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.t2}</td>
+                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.r}</td>
+                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.area.toFixed(2)}</td>
+                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.Ix.toLocaleString()}</td>
+                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.Iy.toLocaleString()}</td>
+                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.Zx.toLocaleString()}</td>
+                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.Zy.toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                </div>
+              )}
 
           {/* ========================================================
               TAB: PROJECTS
@@ -2611,14 +2958,37 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                       <option value="DB32">DB32 (6.310 kg/m)</option>
                       <option value="DB40">DB40 (9.865 kg/m)</option>
                     </optgroup>
-                    <optgroup label="เหล็กบีม H-Beam (มอก. 1227-2558)">
-                      <option value="HB100">HB100 (17.2 kg/m)</option>
-                      <option value="HB125">HB125 (23.8 kg/m)</option>
-                      <option value="HB150">HB150 (31.5 kg/m)</option>
-                      <option value="HB175">HB175 (40.2 kg/m)</option>
-                      <option value="HB200">HB200 (49.9 kg/m)</option>
-                      <option value="HB250">HB250 (72.4 kg/m)</option>
-                      <option value="HB300">HB300 (94.0 kg/m)</option>
+                    <optgroup label="เหล็กโครงสร้างรูปพรรณรีดร้อน H-BEAMS (มอก. 1227-2558)">
+                      <option value="H-100x50">H-100x50 (9.30 kg/m)</option>
+                      <option value="H-100x100">H-100x100 (17.2 kg/m)</option>
+                      <option value="H-125x125">H-125x125 (23.8 kg/m)</option>
+                      <option value="H-150x75">H-150x75 (14.0 kg/m)</option>
+                      <option value="H-150x100">H-150x100 (21.1 kg/m)</option>
+                      <option value="H-150x150">H-150x150 (31.5 kg/m)</option>
+                      <option value="H-175x90">H-175x90 (18.1 kg/m)</option>
+                      <option value="H-175x175">H-175x175 (40.2 kg/m)</option>
+                      <option value="H-200x100">H-200x100 (21.3 kg/m)</option>
+                      <option value="H-200x100 (18.2k)">H-200x100 (18.2k) (18.2 kg/m)</option>
+                      <option value="H-200x150">H-200x150 (30.6 kg/m)</option>
+                      <option value="H-200x200">H-200x200 (49.9 kg/m)</option>
+                      <option value="H-200x200 (56.2k)">H-200x200 (56.2k) (56.2 kg/m)</option>
+                      <option value="H-200x200 (65.7k)">H-200x200 (65.7k) (65.7 kg/m)</option>
+                      <option value="H-250x125">H-250x125 (29.6 kg/m)</option>
+                      <option value="H-250x125 (25.7k)">H-250x125 (25.7k) (25.7 kg/m)</option>
+                      <option value="H-250x175">H-250x175 (44.1 kg/m)</option>
+                      <option value="H-250x250">H-250x250 (72.4 kg/m)</option>
+                      <option value="H-250x250 (64.4k)">H-250x250 (64.4k) (64.4 kg/m)</option>
+                      <option value="H-250x250 (82.2k)">H-250x250 (82.2k) (82.2 kg/m)</option>
+                      <option value="H-300x150">H-300x150 (36.7 kg/m)</option>
+                      <option value="H-300x150 (32k)">H-300x150 (32k) (32.0 kg/m)</option>
+                      <option value="H-300x200">H-300x200 (56.8 kg/m)</option>
+                      <option value="H-300x200 (65.4k)">H-300x200 (65.4k) (65.4 kg/m)</option>
+                      <option value="H-300x300">H-300x300 (94.0 kg/m)</option>
+                      <option value="H-300x300 (84.5k)">H-300x300 (84.5k) (84.5 kg/m)</option>
+                      <option value="H-300x300 (106k)">H-300x300 (106k) (106.0 kg/m)</option>
+                      <option value="H-350x175">H-350x175 (49.6 kg/m)</option>
+                      <option value="H-350x250">H-350x250 (79.7 kg/m)</option>
+                      <option value="H-350x350">H-350x350 (137.0 kg/m)</option>
                     </optgroup>
                     <optgroup label="เหล็กบีม I-Beam (มอก. 1227-2558)">
                       <option value="IB100">IB100 (14.0 kg/m)</option>
