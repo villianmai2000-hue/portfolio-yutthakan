@@ -25,11 +25,29 @@ export default function App() {
   const [selectedProject, setSelectedProject] = useState(null);
   const [prefilledProjectForHire, setPrefilledProjectForHire] = useState('');
 
-  // Modals state
+  // Modals state (รองรับการจำแท็บและการรีโหลดหน้าเว็บ - ข้อกำหนด 14, 15)
   const [isLoginOpen, setIsLoginOpen] = useState(false);
-  const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [adminInitialTab, setAdminInitialTab] = useState('projects');
+  const [isAdminOpen, setIsAdminOpen] = useState(() => {
+    const hash = typeof window !== 'undefined' ? window.location.hash : '';
+    if (hash && hash.startsWith('#admin')) return true;
+    return typeof localStorage !== 'undefined' && localStorage.getItem('yutthakan_admin_open') === 'true';
+  });
+  const [adminInitialTab, setAdminInitialTab] = useState(() => {
+    const hash = typeof window !== 'undefined' ? window.location.hash : '';
+    if (hash && hash.startsWith('#admin-')) {
+      return hash.replace('#admin-', '');
+    }
+    return (typeof localStorage !== 'undefined' && localStorage.getItem('yutthakan_admin_tab')) || 'rebar';
+  });
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
+
+  // Sync admin open state to localStorage and URL hash
+  useEffect(() => {
+    localStorage.setItem('yutthakan_admin_open', isAdminOpen ? 'true' : 'false');
+    if (!isAdminOpen && window.location.hash.startsWith('#admin')) {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, [isAdminOpen]);
 
   // Sync Dark mode with html class
   useEffect(() => {

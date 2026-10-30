@@ -1,6 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { Search, Filter, Layers, ExternalLink, Calendar, MapPin, FileDown, Eye, Image as ImageIcon } from 'lucide-react';
 
+function resolveProjectImage(img) {
+  if (!img) return '';
+  if (typeof img === 'string') return img;
+  if (typeof img === 'object') {
+    return img.dataUrl || img.url || img.src || '';
+  }
+  return '';
+}
+
 export default function PortfolioGrid({ projects = [], categories = [], onSelectProject }) {
   const [selectedCategory, setSelectedCategory] = useState('ทั้งหมด');
   const [searchQuery, setSearchQuery] = useState('');
@@ -95,8 +104,11 @@ export default function PortfolioGrid({ projects = [], categories = [], onSelect
                 {/* Image Container */}
                 <div className="relative aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-800">
                   <img
-                    src={project.coverImage || project.images?.[0] || 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80'}
+                    src={resolveProjectImage(project.coverImage) || resolveProjectImage(project.images?.[0]) || 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80'}
                     alt={project.title}
+                    onError={(e) => {
+                      e.currentTarget.src = 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80';
+                    }}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                     loading="lazy"
                   />

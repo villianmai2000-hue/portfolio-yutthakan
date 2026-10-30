@@ -152,23 +152,52 @@ const DEFAULT_SITE_LOGS = [
   }
 ];
 
-// มาตรฐานน้ำหนักเหล็กเส้นเสริมคอนกรีต (มอก. 24-2559 / วสท.) กิโลกรัมต่อเมตร
+// มาตรฐานน้ำหนักเหล็กเส้นเสริมคอนกรีต (มอก. 24-2559 / วสท.) และเหล็กโครงสร้างรูปพรรณรีดร้อน/เหล็กบีม (มอก. 1227-2558) กิโลกรัมต่อเมตร
 export const REBAR_UNIT_WEIGHTS = {
+  // เหล็กเส้นกลม (Round Bar - มอก. 20-2559)
   'RB6': 0.222,
   'RB9': 0.499,
+  'RB10': 0.617,
+  'RB12': 0.888,
+  'RB15': 1.387,
+  'RB19': 2.226,
+  'RB25': 3.853,
+  // เหล็กข้ออ้อย (Deformed Bar - มอก. 24-2559)
   'DB10': 0.617,
   'DB12': 0.888,
   'DB16': 1.580,
   'DB20': 2.470,
   'DB25': 3.850,
   'DB28': 4.830,
-  'DB32': 6.310
+  'DB32': 6.310,
+  'DB36': 7.990,
+  'DB40': 9.865,
+  // เหล็กโครงสร้างรูปพรรณ / เหล็กบีม (Structural Steel Beam - มอก. 1227-2558)
+  'HB100': 17.2,   // H-Beam 100x100
+  'HB125': 23.8,   // H-Beam 125x125
+  'HB150': 31.5,   // H-Beam 150x150
+  'HB175': 40.2,   // H-Beam 175x175
+  'HB200': 49.9,   // H-Beam 200x200
+  'HB250': 72.4,   // H-Beam 250x250
+  'HB300': 94.0,   // H-Beam 300x300
+  'IB100': 14.0,   // I-Beam 100x75
+  'IB125': 17.5,   // I-Beam 125x75
+  'IB150': 21.1,   // I-Beam 150x100
+  'IB175': 24.2,   // I-Beam 175x100
+  'IB200': 26.0,   // I-Beam 200x100
+  'IB250': 38.3,   // I-Beam 250x125
+  'WF100': 14.0,   // Wide Flange 100x50
+  'WF150': 14.0,   // Wide Flange 150x75
+  'WF200': 21.3,   // Wide Flange 200x100
+  'WF250': 29.6    // Wide Flange 250x125
 };
 
 // ข้อมูลเริ่มต้นสำหรับระบบถอดเหล็กเส้น & ตารางตัดเศษ (BBS)
 export const DEFAULT_REBAR_ITEMS = [
   {
     id: 'rebar-1',
+    group: 'งานเสา',
+    category: 'งานเสา',
     label: 'เสา C1 (ชั้น 1)',
     member: 'เสา C1 (ชั้น 1)',
     rebarType: 'DB20',
@@ -199,6 +228,8 @@ export const DEFAULT_REBAR_ITEMS = [
   },
   {
     id: 'rebar-2',
+    group: 'งานคาน',
+    category: 'งานคาน',
     label: 'คาน B1 (ชั้น 2)',
     member: 'คาน B1 (ชั้น 2)',
     rebarType: 'DB16',
@@ -229,6 +260,8 @@ export const DEFAULT_REBAR_ITEMS = [
   },
   {
     id: 'rebar-3',
+    group: 'งานเสา',
+    category: 'งานเสา',
     label: 'เหล็กปลอกเสา C1',
     member: 'เหล็กปลอกเสา C1',
     rebarType: 'RB6',
@@ -313,6 +346,7 @@ export function calculateRebarMetrics(data) {
   const rebarType = (data.rebarType || data.barType || 'DB20').toUpperCase().trim();
   const weightPerMeter = REBAR_UNIT_WEIGHTS[rebarType] || 2.47;
   const label = data.label || data.member || 'ชิ้นส่วนโครงสร้าง';
+  const group = data.group || data.category || 'งานโครงสร้างทั่วไป';
   const isReused = Boolean(data.isReusedOffcut || data.reusedOffcutId);
 
   let piecesPerStandardBar = Math.max(1, Math.floor(standardLength / cutLength));
@@ -354,6 +388,8 @@ export function calculateRebarMetrics(data) {
     id: data.id || `rebar-${Date.now()}`,
     label,
     member: label,
+    group,
+    category: group,
     rebarType,
     barType: rebarType,
     standardLength,

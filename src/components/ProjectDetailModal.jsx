@@ -4,6 +4,15 @@ import {
   Download, FileText, Box, Layers, ArrowUpRight, MessageSquare 
 } from 'lucide-react';
 
+function resolveProjectImage(img) {
+  if (!img) return '';
+  if (typeof img === 'string') return img;
+  if (typeof img === 'object') {
+    return img.dataUrl || img.url || img.src || '';
+  }
+  return '';
+}
+
 export default function ProjectDetailModal({ project, onClose, onHireForProject }) {
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [fullscreenImage, setFullscreenImage] = useState(null);
@@ -22,9 +31,17 @@ export default function ProjectDetailModal({ project, onClose, onHireForProject 
 
   if (!project) return null;
 
-  const images = project.images && project.images.length > 0 
-    ? project.images 
+  const rawImages = (project.images && project.images.length > 0)
+    ? project.images
     : [project.coverImage || 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80'];
+
+  const images = rawImages
+    .map(img => resolveProjectImage(img))
+    .filter(Boolean);
+
+  if (images.length === 0) {
+    images.push('https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80');
+  }
 
   const prevImage = () => {
     setActiveImageIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1));

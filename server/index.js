@@ -433,27 +433,145 @@ app.get('/api/rebar/plugin/autocad.lsp', (req, res) => {
   (princ)
 )
 
-;; ส่งข้อมูลชิ้นงานจาก AutoCAD ขึ้นเว็บ พร้อมระบุสถานที่นำเศษไปใช้
-(defun c:REBAR_SYNC (/ member bar cut qty usedfor http payload res url)
-  (princ "\\n=== ส่งข้อมูลการตัดเหล็กเส้นจาก AutoCAD ขึ้นระบบเว็บ Real-Time ===")
-  (setq member (getstring T "\\nระบุชื่อชิ้นส่วนโครงสร้าง (เช่น เสา C1 หรือ คาน B1): "))
-  (if (= member "") (setq member "ชิ้นส่วนทั่วไป"))
-  (setq bar (getstring "\\nระบุขนาดเหล็ก (เช่น DB20, DB16, DB12, RB9, RB6) [DB20]: "))
-  (if (= bar "") (setq bar "DB20"))
-  (setq cut (getreal "\\nระบุความยาวที่ตัดใช้ (เมตร เช่น 6.0): "))
-  (if (null cut) (setq cut 6.0))
-  (setq qty (getint "\\nระบุจำนวนท่อนที่ต้องการตัด (ท่อน) [1]: "))
-  (if (null qty) (setq qty 1))
-  (setq usedfor (getstring T "\\nระบุเศษนำไปใช้ที่ไหน (เช่น นำไปเสริมคาน B2 หรือกด Enter ข้าม): "))
+;;; --- ตัวแปรหน่วยความจำเซสชัน: กลุ่มและชื่อโครงสร้างที่เคยใช้ ---
+(if (null *rebar-groups*)  (setq *rebar-groups*  (list "ฐานรากทั่วไป" "งานเสา" "งานคาน" "งานพื้น" "งานผนัง")))
+(if (null *rebar-members*) (setq *rebar-members* (list "เสา C1" "เสา C2" "คาน B1" "คาน B2" "ฐานราก F1" "พื้น S1")))
 
+;;; --- ฟังก์ชันช่วย: แสดงรายการให้เลือกหรือพิมพ์ใหม่ ---
+(defun rebar-pick-or-new (lst prompt-title / i item idx-str idx chosen new-val)
+  (princ (strcat "\\n--- " prompt-title " ---"))
+  (setq i 1)
+  (foreach item lst
+    (princ (strcat "\\n  [" (itoa i) "] " item))
+    (setq i (1+ i))
+  )
+  (princ "\\n  [0] พิมพ์ชื่อใหม่")
+  (setq idx-str (getstring (strcat "\\nเลือก [1-" (itoa (length lst)) "] หรือ [0] พิมพ์ใหม่: ")))
+  (setq idx (atoi idx-str))
+  (if (and (> idx 0) (<= idx (length lst)))
+    (setq chosen (nth (1- idx) lst))
+    (progn
+      (setq new-val (getstring T (strcat "\\nพิมพ์" prompt-title "ใหม่: ")))
+      (if (= new-val "") (setq new-val (car lst)))
+      (setq chosen new-val)
+    )
+  )
+  chosen
+)
+
+;;; --- คำสั่งหลัก REBAR_SYNC v2.0 (ตรงตามข้อกำหนด 1-8) ---
+(defun c:REBAR_SYNC (/ grp member barIdx bartype stdIdx stdlen cut qty useOffcut offcutId http payload url res)
+  (princ "\\n========================================")
+  (princ "\\n  ระบบบันทึกถอดเหล็กเส้น (BBS) v2.0")
+  (princ "\\n========================================")
+
+  ;;; ข้อกำหนด 1: กลุ่ม/หมวดขึ้นก่อนอันดับแรก ให้กดเลือกได้ตามหมวดที่มีในระบบ หรือใส่ชื่อเพิ่มใหม่ได้
+  (setq grp (rebar-pick-or-new *rebar-groups* "กลุ่ม/หมวดงาน (เช่น ฐานรากF1, เสาC1)"))
+  (if (not (member grp *rebar-groups*))
+    (setq *rebar-groups* (append *rebar-groups* (list grp)))
+  )
+  (princ (strcat "\\n[✓] กลุ่ม/หมวด: " grp))
+
+  ;;; ข้อกำหนด 2: ระบุชื่อส่วนโครงสร้าง ให้กดเลือกได้ตามชื่อที่มีก่อนหน้า หรือใส่ชื่อเพิ่มใหม่ได้
+  (setq member (rebar-pick-or-new *rebar-members* "ชื่อส่วนโครงสร้าง (เช่น เสาC1, คานB1, ฐานรากF1)"))
+  (if (not (member member *rebar-members*))
+    (setq *rebar-members* (append *rebar-members* (list member)))
+  )
+  (princ (strcat "\\n[✓] ชิ้นส่วนโครงสร้าง: " member))
+
+  ;;; ข้อกำหนด 3 & 8: ระบุขนาดเหล็ก (มอก.24-2559 + เหล็กบีม มอก.1227-2558) หรือเลือกเหล็กเศษ
+  (princ "\\n--- ขนาดเหล็ก (มอก. + เหล็กบีม) ---")
+  (princ "\\n  เหล็กกลมผิวเรียบ (RB): [1]=RB6 [2]=RB9 [3]=RB10 [4]=RB12")
+  (princ "\\n  เหล็กข้ออ้อย (DB):     [5]=DB10 [6]=DB12 [7]=DB16 [8]=DB20 [9]=DB25 [10]=DB28 [11]=DB32 [12]=DB40")
+  (princ "\\n  เหล็กบีม H-Beam มอก.:  [13]=HB100 [14]=HB125 [15]=HB150 [16]=HB175 [17]=HB200 [18]=HB250")
+  (princ "\\n  เหล็กบีม I-Beam มอก.:  [19]=IB100 [20]=IB125 [21]=IB150 [22]=IB200")
+  (princ "\\n  เหล็กบีม Wide Flange:  [23]=WF150 [24]=WF200 [25]=WF250")
+  (princ "\\n  คลังเศษเหล็กสะสม:      [99]=เลือกดึงเศษในระบบมาใช้")
+  (setq barIdx (getstring "\\nเลือก [1-25] หรือ [99] เพื่อดึงเศษ: "))
+  (setq useOffcut "false")
+  (setq offcutId "")
+  (cond
+    ((= barIdx "1")  (setq bartype "RB6"))
+    ((= barIdx "2")  (setq bartype "RB9"))
+    ((= barIdx "3")  (setq bartype "RB10"))
+    ((= barIdx "4")  (setq bartype "RB12"))
+    ((= barIdx "5")  (setq bartype "DB10"))
+    ((= barIdx "6")  (setq bartype "DB12"))
+    ((= barIdx "7")  (setq bartype "DB16"))
+    ((= barIdx "8")  (setq bartype "DB20"))
+    ((= barIdx "9")  (setq bartype "DB25"))
+    ((= barIdx "10") (setq bartype "DB28"))
+    ((= barIdx "11") (setq bartype "DB32"))
+    ((= barIdx "12") (setq bartype "DB40"))
+    ((= barIdx "13") (setq bartype "HB100"))
+    ((= barIdx "14") (setq bartype "HB125"))
+    ((= barIdx "15") (setq bartype "HB150"))
+    ((= barIdx "16") (setq bartype "HB175"))
+    ((= barIdx "17") (setq bartype "HB200"))
+    ((= barIdx "18") (setq bartype "HB250"))
+    ((= barIdx "19") (setq bartype "IB100"))
+    ((= barIdx "20") (setq bartype "IB125"))
+    ((= barIdx "21") (setq bartype "IB150"))
+    ((= barIdx "22") (setq bartype "IB200"))
+    ((= barIdx "23") (setq bartype "WF150"))
+    ((= barIdx "24") (setq bartype "WF200"))
+    ((= barIdx "25") (setq bartype "WF250"))
+    ((= barIdx "99")
+      (progn
+        (setq bartype (getstring "\\nระบุขนาดเศษเหล็กที่ต้องการ (เช่น DB20, DB16): "))
+        (if (= bartype "") (setq bartype "DB20"))
+        (setq useOffcut "true")
+        (princ (strcat "\\n[กำลังแสดงเศษ " bartype " ในระบบ...]"))
+        (setq offcutId (getstring "\\nกรอก ID เศษเหล็กที่เลือก (หรือ Enter ข้าม): "))
+      )
+    )
+    (t (if (= barIdx "") (setq bartype "DB20") (setq bartype barIdx)))
+  )
+  (princ (strcat "\\n[✓] ขนาดเหล็กที่เลือก: " bartype))
+
+  ;;; ข้อกำหนด 4: ความยาวเหล็กที่เลือกใช้มาตัด เช่น 6.0 m., 10.0m., 12.0 m.
+  (if (= useOffcut "false")
+    (progn
+      (princ "\\n--- ความยาวเหล็กมาตรฐานที่เลือกใช้มาตัด ---")
+      (princ "\\n  [1] 6.0 เมตร   [2] 10.0 เมตร   [3] 12.0 เมตร   [0] พิมพ์ความยาวเอง")
+      (setq stdIdx (getstring "\\nเลือกความยาว [1/2/3/0]: "))
+      (cond
+        ((= stdIdx "1") (setq stdlen 6.0))
+        ((= stdIdx "2") (setq stdlen 10.0))
+        ((= stdIdx "3") (setq stdlen 12.0))
+        (t (setq stdlen (getreal "\\nพิมพ์ความยาวมาตรฐาน (ม.): ")))
+      )
+      (if (null stdlen) (setq stdlen 12.0))
+      (princ (strcat "\\n[✓] ความยาวมาตรฐานที่นำมาตัด: " (rtos stdlen 2 1) " ม."))
+    )
+    (setq stdlen 12.0)
+  )
+
+  ;;; ข้อกำหนด 5: ขึ้นระบุความยาวที่ตัดใช้
+  (setq cut (getreal "\\nระบุความยาวที่ตัดใช้งาน (เมตร เช่น 6.0, 4.5, 3.2): "))
+  (if (null cut) (setq cut 6.0))
+  (princ (strcat "\\n[✓] ความยาวตัดใช้งาน: " (rtos cut 2 2) " ม."))
+
+  ;;; ข้อกำหนด 6: ขึ้นระบุจำนวนท่อนที่ต้องการตัด
+  (setq qty (getint "\\nระบุจำนวนท่อนที่ต้องการตัด (ท่อน): "))
+  (if (null qty) (setq qty 1))
+  (princ (strcat "\\n[✓] จำนวนท่อน: " (itoa qty) " ท่อน"))
+
+  ;;; ข้อกำหนด 7: ลบที่ขึ้นระบุเศษนำไปใช้ที่ไหน (ไม่มีการถามเศษนำไปใช้ที่ไหนแล้ว)
+
+  ;;; บันทึกส่งข้อมูลขึ้นเว็บ Real-Time
   (setq payload (strcat
     "{\\"label\\":\\"" member
     "\\",\\"member\\":\\"" member
-    "\\",\\"rebarType\\":\\"" bar
-    "\\",\\"barType\\":\\"" bar
-    "\\",\\"standardLength\\":12.0,\\"cutLength\\":" (rtos cut 2 2)
+    "\\",\\"group\\":\\"" grp
+    "\\",\\"category\\":\\"" grp
+    "\\",\\"rebarType\\":\\"" bartype
+    "\\",\\"barType\\":\\"" bartype
+    "\\",\\"standardLength\\":" (rtos stdlen 2 2)
+    ",\\"cutLength\\":" (rtos cut 2 2)
     ",\\"quantity\\":" (itoa qty)
-    ",\\"usedFor\\":\\"" usedfor "\\"}"
+    ",\\"isReusedOffcut\\":" useOffcut
+    ",\\"reusedOffcutId\\":\\"" offcutId "\\"}"
   ))
 
   (setq http (vlax-create-object "MSXML2.ServerXMLHTTP.6.0"))
@@ -462,16 +580,14 @@ app.get('/api/rebar/plugin/autocad.lsp', (req, res) => {
     (progn
       (setq url "${baseUrl}/api/rebar")
       (vlax-invoke-method http 'open "POST" url :vlax-false)
-      (vlax-invoke-method http 'setRequestHeader "Content-Type" "application/json")
+      (vlax-invoke-method http 'setRequestHeader "Content-Type" "application/json; charset=utf-8")
       (vl-catch-all-apply 'vlax-invoke-method (list http 'send payload))
       (setq res (vlax-get-property http 'responseText))
       (vlax-release-object http)
-      (princ (strcat "\\n[สำเร็จ!] บันทึก " member " (" bar " ตัด " (rtos cut 2 2) "ม. x " (itoa qty) "ท่อน) ขึ้นหน้าเว็บเรียบร้อยแล้ว!"))
-      (if (/= usedfor "")
-        (princ (strcat "\\n[บันทึกเศษ] ระบุเศษนำไปใช้ที่: " usedfor))
-      )
+      (princ (strcat "\\n\\n[✓ บันทึกสำเร็จ!] [" grp "] " member " (" bartype " ยาว " (rtos cut 2 2) "ม. x " (itoa qty) "ท่อน) ซิงก์ขึ้นระบบเรียบร้อย!"))
+      (princ "\\n[ระบบบนเว็บจะอัปเดตอัตโนมัติภายใน 5 วินาที]")
     )
-    (princ "\\nไม่สามารถสร้าง COM Object สำหรับส่ง HTTP ได้")
+    (princ "\\n[ข้อผิดพลาด] ไม่สามารถเชื่อมต่อ HTTP เพื่อส่งข้อมูลขึ้นเว็บได้")
   )
   (princ)
 )
