@@ -1324,9 +1324,16 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                       </div>
                     </div>
                     <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                      <div className="text-[11px] font-semibold text-slate-500">เปอร์เซ็นต์เศษสูญเปล่า</div>
-                      <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">
-                        {rebarSummary?.averageScrapPercent || rebarSummary?.averageWastePercent || 0}%
+                      <div className="text-[11px] font-semibold text-slate-500">จำนวนท่อนเศษคงเหลือ</div>
+                      <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">
+                        {rebarItems.reduce((acc, itm) => {
+                          const ob = itm.offcutPerBar || 0;
+                          if (ob <= 0 || itm.isReusedOffcut) return acc;
+                          const pcs = itm.piecesPerBar || itm.piecesPerStandardBar || 1;
+                          const bn = itm.standardBarsNeeded !== undefined ? itm.standardBarsNeeded : (itm.barsNeeded || 0);
+                          const q = itm.offcutQuantity !== undefined && itm.offcutQuantity !== null ? Number(itm.offcutQuantity) : (pcs > 1 ? Math.max(1, Math.floor(bn / pcs)) : bn);
+                          return acc + (q || 0);
+                        }, 0)} <span className="text-xs font-normal text-slate-500">ท่อน</span>
                       </div>
                     </div>
                     <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm col-span-2 sm:col-span-1">
@@ -2053,14 +2060,23 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                                     <td className="p-3 text-right font-bold text-amber-600 dark:text-amber-400">
                                       {item.materialCategory === 'plate' || (item.materialCategory === 'pvc' && (item.pvcType === 'fitting' || item.pvcType === 'valve')) ? '-' : `${offcutPerBar} ม.`}
                                     </td>
-                                    <td className="p-3 text-right">
-                                      {item.materialCategory === 'plate' || (item.materialCategory === 'pvc' && (item.pvcType === 'fitting' || item.pvcType === 'valve')) ? '-' : (
-                                        <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${
-                                          scrapPercent > 15 ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                                        }`}>
-                                          {scrapPercent}%
-                                        </span>
-                                      )}
+                                    <td className="p-3 text-right font-bold">
+                                      {item.materialCategory === 'plate' || (item.materialCategory === 'pvc' && (item.pvcType === 'fitting' || item.pvcType === 'valve')) ? (
+                                        <span className="text-slate-400 font-normal">-</span>
+                                      ) : (() => {
+                                        const offcutPieces = (offcutPerBar > 0 && !item.isReusedOffcut)
+                                          ? (item.offcutQuantity !== undefined && item.offcutQuantity !== null && item.offcutQuantity !== ''
+                                              ? Number(item.offcutQuantity)
+                                              : (pieces > 1 ? Math.max(1, Math.floor(barsNeeded / pieces)) : barsNeeded))
+                                          : 0;
+                                        return offcutPieces > 0 ? (
+                                          <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50">
+                                            {offcutPieces} ท่อน
+                                          </span>
+                                        ) : (
+                                          <span className="text-slate-400 font-normal">-</span>
+                                        );
+                                      })()}
                                     </td>
                                     <td className="p-3 text-right font-semibold text-indigo-600 dark:text-indigo-400">
                                       {weightKg} กก.
@@ -2440,14 +2456,14 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                             <span className="text-[10px] font-bold text-slate-400">🔩 งานเหล็กเส้น (มอก.)</span>
                           </div>
                           <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
-                            <b>วิธีใช้:</b> พิมพ์คำสั่งแล้วทำตาม 6 ขั้นตอน:
+                            <b>วิธีใช้:</b> พิมพ์คำสั่งแล้วทำตาม 5 ขั้นตอน:
                           </p>
-                          <ul className="text-[11px] text-slate-500 space-y-0.5 list-disc list-inside">
-                            <li>เลือกกลุ่ม/หมวดงาน (ฐานราก, เสา, คาน หรือพิมพ์ชื่อใหม่)</li>
-                            <li>ระบุชื่อส่วนโครงสร้าง (เช่น เสา C1, คาน B2)</li>
-                            <li>เลือกขนาดเหล็ก (RB6-RB12, DB10-DB40) หรือกด 99 ดึงเศษในสต็อก</li>
-                            <li>เลือกความยาวมาตรฐานที่นำมาตัด (10.0m หรือ 12.0m)</li>
-                            <li>ระบุความยาวที่ตัดใช้จริง (เมตร) และจำนวนท่อนที่ต้องการตัด</li>
+                          <ul className="text-[11px] text-slate-500 space-y-1 list-disc list-inside">
+                            <li><b>ขั้นตอน 1:</b> เลือกกลุ่ม/หมวดงาน (กด 1 เพื่อเลื่อนเลือกในระบบ หรือกด 0 พิมพ์ชื่อใหม่)</li>
+                            <li><b>ขั้นตอน 2:</b> ระบุชื่อส่วนโครงสร้าง (กด 1 เพื่อเลื่อนเลือกในระบบ หรือกด 0 พิมพ์ชื่อใหม่)</li>
+                            <li><b>ขั้นตอน 3:</b> เลือกขนาดเหล็ก (RB6-RB12, DB10-DB40 กด 1 เลื่อนเลือก) หรือกด 00 ดึงเศษในสต็อก</li>
+                            <li><b>ขั้นตอน 4:</b> เลือกความยาวมาตรฐานที่นำมาตัด (10.0m หรือ 12.0m)</li>
+                            <li><b>ขั้นตอน 5:</b> ระบุความยาวที่ตัดใช้จริง (เมตร) และจำนวนท่อนที่ต้องการตัด</li>
                           </ul>
                         </div>
 
@@ -4546,7 +4562,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     <div>ตัดได้ต่อเส้น: <b>{currentCalc.piecesPerBar} ท่อน</b></div>
                     <div>ต้องใช้เส้นมาตรฐาน: <b className="text-emerald-600 dark:text-emerald-400 font-bold">{currentCalc.standardBarsNeeded} เส้น</b></div>
                     <div>เศษเหลือต่อเส้น: <b className="text-amber-600 font-bold">{currentCalc.offcutPerBar} ม.</b></div>
-                    <div>เศษสูญเปล่า: <b>{currentCalc.scrapPercent}%</b></div>
+                    <div>จำนวนท่อนเศษที่เกิด: <b className="text-amber-600 font-bold">{(currentCalc.offcutPerBar > 0) ? (currentCalc.offcutQuantity || (currentCalc.piecesPerBar > 1 ? Math.max(1, Math.floor(currentCalc.standardBarsNeeded / currentCalc.piecesPerBar)) : currentCalc.standardBarsNeeded) || 1) : 0} ท่อน</b></div>
                     <div className="col-span-2">
                       น้ำหนักวัสดุตัดใช้: <b className="text-indigo-600 dark:text-indigo-400">{currentCalc.totalWeightKg} กก.</b> ({(currentCalc.totalWeightKg / 1000).toFixed(3)} ตัน)
                     </div>
