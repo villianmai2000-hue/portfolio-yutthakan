@@ -332,6 +332,20 @@ app.get('/api/rebar/summary', async (req, res) => {
 });
 
 // ดึงรายการหมวดหมู่และชื่อชิ้นส่วนที่มีอยู่ในระบบทั้งหมด (สำหรับ AutoCAD & ปลั๊กอิน)
+// รายชื่อกลุ่ม/หมวดงานทั้งหมดในระบบ ส่งให้ AutoCAD ซิงก์ข้อมูลตรงกัน
+app.get('/api/rebar/groups.txt', async (req, res) => {
+  try {
+    const items = await DataService.getRebarItems();
+    const groups = [...new Set(items.map(x => (x.group || x.category || '').trim()).filter(Boolean))];
+    const defaultGroups = ['งานเสา NO.100', 'F1-C1 NO.1', 'F2-C2A NO.2', 'ฐานราก F1', 'งานเสา', 'งานคาน', 'งานพื้น', 'งานโครงสร้างเหล็ก', 'งานสุขาภิบาล/ท่อ'];
+    const merged = [...new Set([...groups, ...defaultGroups])];
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(merged.join('\n'));
+  } catch (err) {
+    res.status(500).send('ERROR');
+  }
+});
+
 app.get('/api/rebar/metadata.txt', async (req, res) => {
   try {
     const items = await DataService.getRebarItems();

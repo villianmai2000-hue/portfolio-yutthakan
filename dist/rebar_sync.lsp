@@ -1,5 +1,5 @@
 ;;; =========================================================================
-;;; AutoLISP: Yutthakan Structural Material Takeoff & BBS Live Sync v5.5
+;;; AutoLISP: Yutthakan Structural Material Takeoff & BBS Live Sync v6.0
 ;;; สถาปนิกและวิศวกรโครงสร้าง: ยุทธการ คำกลอน
 ;;; รองรับ 10 หมวดคำสั่งถอดแบบโครงสร้าง ซิงก์ขึ้นเว็บแบบเรียลไทม์
 ;;; ล็อคเบอร์ NO หมวดและชิ้นส่วนเพื่อความสะดวกรวดเร็วใน AutoCAD
@@ -8,7 +8,7 @@
 
 ;;; ตัวแปรเก็บหมวดและชิ้นส่วน (บันทึกจำไว้ตลอดการทำงานของ AutoCAD)
 (if (null *rebar-groups*)
-  (setq *rebar-groups* (list "ฐานราก F1" "งานเสา" "งานคาน" "งานพื้น" "งานโครงสร้างเหล็ก" "งานสุขาภิบาล/ท่อ" "F1-C1 NO.1" "F2-C2A NO.2"))
+  (setq *rebar-groups* (list "งานเสา NO.100" "F1-C1 NO.1" "F2-C2A NO.2" "ฐานราก F1" "งานเสา" "งานคาน" "งานพื้น" "งานโครงสร้างเหล็ก" "งานสุขาภิบาล/ท่อ"))
 )
 (if (null *rebar-members*)
   (setq *rebar-members* (list "เสา C1 ช่วงล่าง" "เสา C2" "คาน B1" "คาน B2" "ฐานราก F1" "เหล็กเสริมเสา" "เพลทหัวเสา P1" "แปหลังคา C1" "พื้นคอนกรีต S1"))
@@ -44,90 +44,137 @@
 )
 
 ;;; =========================================================================
-;;; ขั้นตอนที่ 1/5: เลือกกลุ่ม / หมวดงาน (Group / Category)
-;;; ล็อคตามเบอร์ NO เพื่อเลือกได้ง่ายและรวดเร็ว
+;;; ซิงก์รายชื่อกลุ่มจาก Web Server แบบ Real-Time
 ;;; =========================================================================
-(defun rebar-step1-group (/ inp grp i sel idx maxN baseName itemText)
+(defun rebar-fetch-groups (/ http url res lines line trimmed)
+  (setq url "https://portfolio-yutthakan.onrender.com/api/rebar/groups.txt")
+  (setq http (vlax-create-object "MSXML2.ServerXMLHTTP.6.0"))
+  (if (null http) (setq http (vlax-create-object "WinHttp.WinHttpRequest.5.1")))
+  (if http
+    (progn
+      (vl-catch-all-apply
+        (function (lambda ()
+          (vlax-invoke-method http 'open "GET" url vlax-false)
+          (vlax-invoke-method http 'send)
+          (setq res (vlax-get-property http 'responseText))
+        ))
+      )
+      (vlax-release-object http)
+    )
+  )
+  (if (and res (/= res "") (/= res "ERROR"))
+    (progn
+      (setq lines (rebar-str-split "\n" res))
+      (foreach line lines
+        (setq trimmed (vl-string-trim " \t\r\n" line))
+        (if (and (/= trimmed "") (not (member trimmed *rebar-groups*)))
+          (setq *rebar-groups* (append *rebar-groups* (list trimmed)))
+        )
+      )
+    )
+  )
+  *rebar-groups*
+)
+
+;;; ฟังก์ชันค้นหากลุ่มด้วยหมายเลข NO เช่น 100, NO.100 หรือคำสำคัญ
+(defun rebar-find-group-by-no (inp / s cleanNo matched g)
+  (setq s (vl-string-trim " \t\r\n" inp))
+  (setq cleanNo s)
+  (if (wcmatch (strcase cleanNo) "NO.*") (setq cleanNo (substr cleanNo 4)))
+  (if (wcmatch (strcase cleanNo) "NO *") (setq cleanNo (substr cleanNo 4)))
+  (setq cleanNo (vl-string-trim " \t\r\n" cleanNo))
+  (setq matched nil)
+  (foreach g *rebar-groups*
+    (if (null matched)
+      (if (or
+            (= (strcase g) (strcase s))
+            (wcmatch (strcase g) (strcat "*NO." (strcase cleanNo) "*"))
+            (wcmatch (strcase g) (strcat "*NO " (strcase cleanNo) "*"))
+            (wcmatch (strcase g) (strcat "*" (strcase s) "*"))
+          )
+        (setq matched g)
+      )
+    )
+  )
+  matched
+)
+
+;;; =========================================================================
+;;; ขั้นตอนที่ 1/5: เลือกกลุ่ม / หมวดงาน (Group / Category)
+;;; ค้นหาและล็อคตามเบอร์ NO (เช่น พิมพ์ 100 หรือ NO.100 จะล็อคเข้า "งานเสา NO.100" ตรงกับเว็บ)
+;;; =========================================================================
+(defun rebar-step1-group (/ grp sel matched idx maxN i)
   (princ "\n=======================================================")
   (princ "\nขั้นตอนที่ 1/5: เลือกกลุ่ม / หมวดงาน (Group / Category)")
   (princ "\n=======================================================")
-  (princ "\nรายการกลุ่ม/หมวดงานในระบบ (ล็อคตามเบอร์ NO):")
+  ;; ซิงก์รายชื่อกลุ่มจาก Web Server
+  (rebar-fetch-groups)
+  (if (null *rebar-groups*)
+    (setq *rebar-groups* (list "งานเสา NO.100" "F1-C1 NO.1" "F2-C2A NO.2" "ฐานราก F1" "งานเสา" "งานคาน" "งานพื้น" "งานโครงสร้างเหล็ก"))
+  )
+
+  (princ "\nรายการกลุ่ม/หมวดงานในระบบ:")
   (setq maxN (min (length *rebar-groups*) 10))
   (setq i 0)
   (while (< i maxN)
-    (setq baseName (nth i *rebar-groups*))
-    (princ (strcat "\n  [NO." (itoa (1+ i)) "] " baseName))
+    (princ (strcat "\n  [" (itoa (1+ i)) "] " (nth i *rebar-groups*)))
     (setq i (1+ i))
   )
-  (princ "\n  [0] พิมพ์ชื่อกลุ่ม/หมวดงานใหม่เอง")
-  (setq sel (getstring T (strcat "\nเลือกกดเบอร์ NO [1-" (itoa maxN) "] หรือกด 0 พิมพ์ใหม่ <1>: ")))
+  (princ "\n  [0] พิมพ์ชื่อกลุ่มใหม่เอง")
+  (setq sel (getstring T (strcat "\nเลือกกด [1-" (itoa maxN) "], พิมพ์เลข NO (เช่น 100, NO.100) หรือพิมพ์ชื่อกลุ่ม <1>: ")))
   (setq sel (vl-string-trim " \t\r\n" sel))
+
   (cond
-    ((= sel "0")
-      (setq grp (getstring T "\nระบุชื่อกลุ่ม/หมวดงานใหม่ (ใส่เบอร์ NO ได้ เช่น F1-C1 NO.1): "))
-      (setq grp (vl-string-trim " \t\r\n" grp))
-      (if (= grp "") (setq grp "งานโครงสร้างทั่วไป NO.1"))
-      (if (not (member grp *rebar-groups*))
-        (setq *rebar-groups* (append *rebar-groups* (list grp)))
-      )
+    ((= sel "")
+      (setq grp (car *rebar-groups*))
     )
-    ((or (= sel "") (= sel "1"))
-      (setq grp (strcat (car *rebar-groups*) " NO.1"))
+    ;; ค้นหาตามเลข NO ในระบบเว็บ
+    ((setq matched (rebar-find-group-by-no sel))
+      (setq grp matched)
     )
-    ((and (> (strlen sel) 0) (vl-every '(lambda (c) (and (>= c 48) (<= c 57))) (vl-string->list sel)))
+    ;; พิมพ์ตัวเลขลำดับเมนู 1 ถึง maxN
+    ((and (vl-every '(lambda (c) (and (>= c 48) (<= c 57))) (vl-string->list sel))
+          (> (atoi sel) 0)
+          (<= (atoi sel) (length *rebar-groups*)))
       (setq idx (atoi sel))
-      (if (and (> idx 0) (<= idx (length *rebar-groups*)))
-        (setq grp (strcat (nth (1- idx) *rebar-groups*) " NO." (itoa idx)))
-        (setq grp (strcat (car *rebar-groups*) " NO.1"))
+      (setq grp (nth (1- idx) *rebar-groups*))
+    )
+    ;; กด 0 พิมพ์ใหม่
+    ((= sel "0")
+      (setq grp (getstring T "\nระบุชื่อกลุ่ม/หมวดงานใหม่ (เช่น งานเสา NO.100): "))
+      (setq grp (vl-string-trim " \t\r\n" grp))
+      (if (= grp "") (setq grp (car *rebar-groups*)))
+      (if (not (member grp *rebar-groups*))
+        (setq *rebar-groups* (cons grp *rebar-groups*))
       )
     )
-    (t (setq grp sel))
+    ;; พิมพ์ชื่อเต็มหรือชื่อใหม่ใดๆ
+    (t
+      (setq grp sel)
+      (if (not (member grp *rebar-groups*))
+        (setq *rebar-groups* (cons grp *rebar-groups*))
+      )
+    )
   )
-  (princ (strcat "\n[✓ ล็อคหมวดงาน]: " grp))
+  (princ (strcat "\n[✓ ล็อคหมวดงานตรงกับเว็บ]: " grp))
   grp
 )
 
 ;;; =========================================================================
 ;;; ขั้นตอนที่ 2/5: ระบุชื่อส่วนโครงสร้าง (Structural Member)
-;;; ล็อคตามเบอร์ NO เพื่อเลือกได้ง่ายและรวดเร็ว
+;;; ให้ใส่ชื่อไปเลย ไม่มีเบอร์กด และไม่มีการบังคับต่อท้าย NO
 ;;; =========================================================================
-(defun rebar-step2-member (/ inp mem i sel idx maxN baseName)
+(defun rebar-step2-member (/ defaultMem mem)
   (princ "\n-------------------------------------------------------")
   (princ "\nขั้นตอนที่ 2/5: ระบุชื่อส่วนโครงสร้าง (Structural Member)")
   (princ "\n-------------------------------------------------------")
-  (princ "\nรายการชื่อส่วนโครงสร้างในระบบ (ล็อคตามเบอร์ NO):")
-  (setq maxN (min (length *rebar-members*) 10))
-  (setq i 0)
-  (while (< i maxN)
-    (setq baseName (nth i *rebar-members*))
-    (princ (strcat "\n  [NO." (itoa (1+ i)) "] " baseName))
-    (setq i (1+ i))
-  )
-  (princ "\n  [0] พิมพ์ชื่อส่วนโครงสร้างใหม่เอง")
-  (setq sel (getstring T (strcat "\nเลือกกดเบอร์ NO [1-" (itoa maxN) "] หรือกด 0 พิมพ์ใหม่ <1>: ")))
-  (setq sel (vl-string-trim " \t\r\n" sel))
-  (cond
-    ((= sel "0")
-      (setq mem (getstring T "\nระบุชื่อส่วนโครงสร้างใหม่ (เช่น เสา C1 ช่วงล่าง, คาน B2): "))
-      (setq mem (vl-string-trim " \t\r\n" mem))
-      (if (= mem "") (setq mem "ชิ้นส่วน NO.1"))
-      (if (not (member mem *rebar-members*))
-        (setq *rebar-members* (append *rebar-members* (list mem)))
-      )
-    )
-    ((or (= sel "") (= sel "1"))
-      (setq mem (strcat (car *rebar-members*) " NO.1"))
-    )
-    ((and (> (strlen sel) 0) (vl-every '(lambda (c) (and (>= c 48) (<= c 57))) (vl-string->list sel)))
-      (setq idx (atoi sel))
-      (if (and (> idx 0) (<= idx (length *rebar-members*)))
-        (setq mem (strcat (nth (1- idx) *rebar-members*) " NO." (itoa idx)))
-        (setq mem (strcat (car *rebar-members*) " NO.1"))
-      )
-    )
-    (t (setq mem sel))
-  )
-  (princ (strcat "\n[✓ ล็อคชิ้นส่วน]: " mem))
+  (if (null *rebar-last-member*) (setq *rebar-last-member* "เสา C1"))
+  (setq defaultMem *rebar-last-member*)
+  (setq mem (getstring T (strcat "\nระบุชื่อส่วนโครงสร้าง (เช่น เสา C1, คาน B2, เสา C1 ช่วงล่าง, ฐานราก F1) <" defaultMem ">: ")))
+  (setq mem (vl-string-trim " \t\r\n" mem))
+  (if (= mem "") (setq mem defaultMem))
+  (setq *rebar-last-member* mem)
+  (princ (strcat "\n[✓ ระบุชื่อชิ้นส่วน]: " mem))
   mem
 )
 
@@ -321,7 +368,7 @@
 ;;; =========================================================================
 ;;; 1. คำสั่ง REBAR_SYNC / SYNC_REBAR (ถอดเหล็กเส้น มอก. 5 ขั้นตอน)
 ;;; =========================================================================
-(defun c:REBAR_SYNC (/ grp mem step3Res bartype isOffcut offcutSourceLen stdlen step5Res cut qty pieces barsNeeded offcutPerBar offcutQty payload)
+(defun c:REBAR_SYNC (/ grp mem step3Res bartype isOffcut offcutSourceLen stdlen step5Res cut qty pieces barsNeeded offcutPerBar offcutQty offcutMsg rFull rLast fullBars lastPieces payload)
   (princ "\n=======================================================")
   (princ "\n  [AutoCAD] ถอดเหล็กเส้นเสริมคอนกรีต (BBS Live Sync)")
   (princ "\n=======================================================")
@@ -346,15 +393,47 @@
   (setq cut (nth 0 step5Res))
   (setq qty (nth 1 step5Res))
 
-  ;; คำนวณจำนวนเส้นและเศษใน AutoCAD
+  ;; คำนวณจำนวนเส้นและเศษใน AutoCAD ตามการตัดจริงทางกายภาพ (Physical Cutting Math)
   (setq pieces (max 1 (fix (/ stdlen cut))))
   (setq barsNeeded (fix (+ (/ (- qty 1) pieces) 1)))
-  (if (> pieces 1)
-    (setq offcutQty (fix (/ barsNeeded pieces)))
-    (setq offcutQty barsNeeded)
+
+  (setq offcutQty 0)
+  (setq offcutMsg "")
+  (setq offcutPerBar 0.0)
+
+  (if (= (rem qty pieces) 0)
+    (progn
+      (setq rFull (- stdlen (* pieces cut)))
+      (setq offcutPerBar rFull)
+      (if (> rFull 0.05)
+        (progn
+          (setq offcutQty barsNeeded)
+          (setq offcutMsg (strcat (rtos rFull 2 2) " ม. จำนวน " (itoa barsNeeded) " ท่อน"))
+        )
+        (setq offcutMsg "0 ม. (ไม่มีเศษ)")
+      )
+    )
+    (progn
+      (setq fullBars (- barsNeeded 1))
+      (setq rFull (- stdlen (* pieces cut)))
+      (setq lastPieces (- qty (* fullBars pieces)))
+      (setq rLast (- stdlen (* lastPieces cut)))
+      (setq offcutPerBar (if (> rFull 0.05) rFull rLast))
+      (setq offcutQty (+ (if (> rFull 0.05) fullBars 0) (if (> rLast 0.05) 1 0)))
+      (cond
+        ((and (> rFull 0.05) (> fullBars 0) (> rLast 0.05))
+          (setq offcutMsg (strcat (rtos rFull 2 2) " ม. (" (itoa fullBars) " ท่อน) + " (rtos rLast 2 2) " ม. (1 ท่อน)"))
+        )
+        ((> rLast 0.05)
+          (setq offcutMsg (strcat (rtos rLast 2 2) " ม. (1 ท่อน)"))
+        )
+        ((and (> rFull 0.05) (> fullBars 0))
+          (setq offcutMsg (strcat (rtos rFull 2 2) " ม. (" (itoa fullBars) " ท่อน)"))
+        )
+        (t (setq offcutMsg "0 ม. (ไม่มีเศษ)"))
+      )
+    )
   )
-  (if (<= offcutQty 0) (setq offcutQty 1))
-  (setq offcutPerBar (- stdlen (* cut pieces)))
 
   (princ "\n-------------------------------------------------------")
   (princ "\n[ผลคำนวณ BBS ใน AutoCAD]:")
@@ -364,9 +443,7 @@
     (princ (strcat "\n  - ดึงเศษสต็อก: " bartype " ยาว " (rtos stdlen 2 2) "m ตัดใช้ " (rtos cut 2 2) "ม. จำนวน " (itoa qty) " ท่อน"))
     (princ (strcat "\n  - สรุปสั่งเหล็ก: " bartype " (" (rtos stdlen 2 1) "m) ทั้งหมด " (itoa barsNeeded) " เส้น | 1 เส้นตัดได้ " (itoa pieces) " ท่อน"))
   )
-  (if (> offcutPerBar 0.05)
-    (princ (strcat "\n  - ท่อนเศษคงเหลือ: ท่อนละ " (rtos offcutPerBar 2 2) " ม. จำนวน " (itoa offcutQty) " ท่อน"))
-  )
+  (princ (strcat "\n  - ท่อนเศษคงเหลือจริง: " offcutMsg " (รวม " (itoa offcutQty) " ท่อน)"))
   (princ "\n-------------------------------------------------------")
 
   (setq payload (strcat

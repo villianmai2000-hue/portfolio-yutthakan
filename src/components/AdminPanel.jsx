@@ -729,26 +729,52 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
       };
     }
 
-    const piecesPerBar = Math.max(1, Math.floor(sLen / cLen));
-    const standardBarsNeeded = Math.ceil(count / piecesPerBar);
-    const totalStandardLength = standardBarsNeeded * sLen;
-    const totalScrapLength = Math.max(0, totalStandardLength - totalCutLength);
+    const P = Math.max(1, Math.floor(sLen / cLen));
+    const standardBarsNeeded = Math.ceil(count / P);
+    const totalStandardLength = Number((standardBarsNeeded * sLen).toFixed(2));
+    const totalScrapLength = Number(Math.max(0, totalStandardLength - totalCutLength).toFixed(2));
     const scrapPercent = totalStandardLength > 0 ? ((totalScrapLength / totalStandardLength) * 100) : 0;
-    
-    const offcutPerBar = (standardBarsNeeded === 1) 
-      ? totalScrapLength 
-      : Number((totalScrapLength / standardBarsNeeded).toFixed(2));
+
+    const offcutPiecesList = [];
+    let offcutPerBar = 0;
+    if (count % P === 0) {
+      const rFull = Number((sLen - (P * cLen)).toFixed(2));
+      if (rFull > 0.05) {
+        offcutPiecesList.push({ length: rFull, quantity: standardBarsNeeded });
+      }
+      offcutPerBar = rFull;
+    } else {
+      const fullBars = standardBarsNeeded - 1;
+      const rFull = Number((sLen - (P * cLen)).toFixed(2));
+      if (rFull > 0.05 && fullBars > 0) {
+        offcutPiecesList.push({ length: rFull, quantity: fullBars });
+      }
+      const lastBarPieces = count - (fullBars * P);
+      const rLast = Number((sLen - (lastBarPieces * cLen)).toFixed(2));
+      if (rLast > 0.05) {
+        offcutPiecesList.push({ length: rLast, quantity: 1 });
+      }
+      offcutPerBar = rFull > 0.05 ? rFull : rLast;
+    }
+
+    const offcutQuantity = offcutPiecesList.reduce((acc, o) => acc + o.quantity, 0);
+    let offcutDisplay = '0 ม.';
+    if (offcutPiecesList.length === 1) {
+      offcutDisplay = `${offcutPiecesList[0].length} ม. (${offcutPiecesList[0].quantity} ท่อน)`;
+    } else if (offcutPiecesList.length > 1) {
+      offcutDisplay = offcutPiecesList.map(o => `${o.length} ม. (${o.quantity} ท่อน)`).join(' + ');
+    }
 
     const totalWeightKg = totalCutLength * unitWeight;
     const totalBarWeightKg = totalStandardLength * unitWeight;
 
-    const offcutQuantity = Number(formExtra.offcutQuantity) || (piecesPerBar > 1 ? Math.floor(standardBarsNeeded / piecesPerBar) : standardBarsNeeded) || 1;
-
     return {
-      piecesPerBar,
+      piecesPerBar: P,
       standardBarsNeeded,
       offcutPerBar: Number(offcutPerBar.toFixed(2)),
       offcutQuantity,
+      offcutPiecesList,
+      offcutDisplay,
       totalCutLength: Number(totalCutLength.toFixed(2)),
       totalStandardLength: Number(totalStandardLength.toFixed(2)),
       totalScrapLength: Number(totalScrapLength.toFixed(2)),
@@ -818,16 +844,21 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
     }
   };
 
-  // ลบรายการเหล็กโดยไม่ออกจากหน้านั้นหรือรีเซ็ตแท็บ (ข้อกำหนด 14)
+  // ลบรายการเหล็กโดยไม่ออกจากหน้านั้นหรือรีเซ็ตแท็บ (ข้อกำหนด 14) และลบเศษเหล็กที่เชื่อมโยงอัตโนมัติ
   const handleDeleteRebar = async (id, e) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
-    if (!window.confirm('คุณแน่ใจหรือไม่ว่าต้องการลบรายการถอดเหล็กเส้นนี้?')) return;
+    if (!window.confirm('คุณแน่ใจหรือไม่ว่าต้องการลบรายการถอดเหล็กนี้? (เศษเหล็กที่เชื่อมโยงจะถูกลบออกจากคลังเศษด้วย)')) return;
     try {
+      const target = rebarItems.find(it => it.id === id);
       await api.deleteRebarItem(id);
-      showFeedback('success', 'ลบรายการเหล็กเรียบร้อย');
+      showFeedback('success', 'ลบรายการและเศษเหล็กที่เชื่อมโยงเรียบร้อย');
+      setRebarItems(prev => prev.filter(it => it.id !== id));
+      if (target) {
+        setRebarOffcuts(prev => prev.filter(o => o.rebarItemId !== id && o.sourceItemId !== id && (!target.label || o.sourceLabel !== target.label)));
+      }
       await loadRebarData(false);
     } catch (err) {
       showFeedback('error', 'ลบไม่สำเร็จ: ' + err.message);
@@ -2057,18 +2088,20 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                                         <>{barsNeeded} <span className="text-[10px] font-normal text-slate-400">เส้น</span></>
                                       )}
                                     </td>
-                                    <td className="p-3 text-right font-bold text-amber-600 dark:text-amber-400">
-                                      {item.materialCategory === 'plate' || (item.materialCategory === 'pvc' && (item.pvcType === 'fitting' || item.pvcType === 'valve')) ? '-' : `${offcutPerBar} ม.`}
+                                    <td className="p-3 text-right font-bold text-amber-600 dark:text-amber-400 text-xs">
+                                      {item.materialCategory === 'plate' || (item.materialCategory === 'pvc' && (item.pvcType === 'fitting' || item.pvcType === 'valve')) ? '-' : (item.offcutDisplay || (offcutPerBar > 0 ? `${offcutPerBar} ม.` : '-'))}
                                     </td>
                                     <td className="p-3 text-right font-bold">
                                       {item.materialCategory === 'plate' || (item.materialCategory === 'pvc' && (item.pvcType === 'fitting' || item.pvcType === 'valve')) ? (
                                         <span className="text-slate-400 font-normal">-</span>
                                       ) : (() => {
-                                        const offcutPieces = (offcutPerBar > 0 && !item.isReusedOffcut)
-                                          ? (item.offcutQuantity !== undefined && item.offcutQuantity !== null && item.offcutQuantity !== ''
-                                              ? Number(item.offcutQuantity)
-                                              : (pieces > 1 ? Math.max(1, Math.floor(barsNeeded / pieces)) : barsNeeded))
-                                          : 0;
+                                        const offcutPieces = item.offcutQuantity !== undefined && item.offcutQuantity !== null && item.offcutQuantity !== ''
+                                          ? Number(item.offcutQuantity)
+                                          : (item.offcutPiecesList && item.offcutPiecesList.length > 0)
+                                            ? item.offcutPiecesList.reduce((acc, o) => acc + o.quantity, 0)
+                                            : ((offcutPerBar > 0 && !item.isReusedOffcut)
+                                                ? (pieces > 1 ? Math.max(1, Math.floor(barsNeeded / pieces)) : barsNeeded)
+                                                : 0);
                                         return offcutPieces > 0 ? (
                                           <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50">
                                             {offcutPieces} ท่อน
@@ -2456,14 +2489,14 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                             <span className="text-[10px] font-bold text-slate-400">🔩 งานเหล็กเส้น (มอก.)</span>
                           </div>
                           <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
-                            <b>วิธีใช้:</b> พิมพ์คำสั่งแล้วทำตาม 5 ขั้นตอน (มีชื่อและเบอร์ NO กำกับชัดเจน):
+                            <b>วิธีใช้:</b> พิมพ์คำสั่งแล้วทำตาม 5 ขั้นตอน (ซิงก์ตรงกับระบบเว็บ):
                           </p>
                           <ul className="text-[11px] text-slate-500 space-y-1 list-disc list-inside">
-                            <li><b>ขั้นตอนที่ 1/5: เลือกกลุ่ม / หมวดงาน:</b> กดเบอร์ NO เช่น 1=NO.1 ฐานราก, 2=NO.2 เสา หรือกด 0 พิมพ์ใหม่</li>
-                            <li><b>ขั้นตอนที่ 2/5: ระบุชื่อส่วนโครงสร้าง:</b> กดเบอร์ NO เช่น 1=NO.1 เสา C1, 2=NO.2 เสา C2 หรือกด 0 พิมพ์ใหม่</li>
+                            <li><b>ขั้นตอนที่ 1/5: เลือกกลุ่ม / หมวดงาน:</b> กด [1-N] หรือพิมพ์เลข NO เช่น 100 เพื่อล็อคเข้า "งานเสา NO.100" ในระบบเว็บ หรือกด 0 พิมพ์ใหม่</li>
+                            <li><b>ขั้นตอนที่ 2/5: ระบุชื่อส่วนโครงสร้าง:</b> พิมพ์ชื่อชิ้นส่วนได้โดยตรง เช่น เสา C1, คาน B2 หรือกด Enter เพื่อใช้ชื่อเดิม (ไม่มีเบอร์กดและไม่บังคับ NO)</li>
                             <li><b>ขั้นตอนที่ 3/5: เลือกขนาดเหล็กเส้น:</b> พิมพ์หมายเลข [1-11], พิมพ์ขนาดเช่น DB20 หรือกด 99 ดึงเศษสต็อก</li>
                             <li><b>ขั้นตอนที่ 4/5: ความยาวมาตรฐานที่นำมาตัด:</b> เลือกความยาวมาตรฐาน [1]=10.0m หรือ [2]=12.0m</li>
-                            <li><b>ขั้นตอนที่ 5/5: ระบุความยาวตัดใช้จริง และจำนวนท่อน:</b> ระบุความยาวตัดใช้จริง (ม.) และจำนวนท่อนที่ต้องการตัด</li>
+                            <li><b>ขั้นตอนที่ 5/5: ระบุความยาวตัดใช้จริง และจำนวนท่อน:</b> ระบุความยาวตัดใช้จริง (ม.) และจำนวนท่อนที่ต้องการตัด คำนวณเศษจริงแยกตามท่อน</li>
                           </ul>
                         </div>
 
@@ -3725,38 +3758,35 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    📌 ชื่อส่วนโครงสร้าง (เช่น เสา C1 ช่วงล่าง, คาน B2, เพลทหัวเสา P1, แปหลังคา Purlin)
+                    📌 ชื่อส่วนโครงสร้าง (เช่น เสา C1, คาน B2, เสา C1 ช่วงล่าง, เพลทหัวเสา P1, แปหลังคา Purlin)
                   </label>
-                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800/40">
-                    ล็อคเบอร์ NO สำหรับ AutoCAD
-                  </span>
                 </div>
-                <div className="flex flex-wrap gap-1 mb-1.5">
+                <div className="flex flex-wrap gap-1.5 mb-1.5">
                   {[
-                    { no: 'NO.1', name: 'เสา C1 ช่วงล่าง' },
-                    { no: 'NO.2', name: 'เสา C2' },
-                    { no: 'NO.3', name: 'คาน B1' },
-                    { no: 'NO.4', name: 'คาน B2' },
-                    { no: 'NO.5', name: 'ฐานราก F1' },
-                    { no: 'NO.6', name: 'เพลทหัวเสา P1' },
-                    { no: 'NO.7', name: 'แปหลังคา C1' },
-                    { no: 'NO.8', name: 'พื้นคอนกรีต S1' }
-                  ].map(item => {
-                    const fullText = `${item.name} ${item.no}`;
-                    const isSelected = rebarForm.label === fullText || rebarForm.label === item.name;
+                    'เสา C1',
+                    'เสา C1 ช่วงล่าง',
+                    'เสา C2',
+                    'คาน B1',
+                    'คาน B2',
+                    'ฐานราก F1',
+                    'เหล็กเสริมเสา',
+                    'เพลทหัวเสา P1',
+                    'แปหลังคา C1',
+                    'พื้นคอนกรีต S1'
+                  ].map(name => {
+                    const isSelected = rebarForm.label === name;
                     return (
                       <button
-                        key={item.no}
+                        key={name}
                         type="button"
-                        onClick={() => setRebarForm({ ...rebarForm, label: fullText })}
-                        className={`px-2 py-0.5 rounded text-[10px] font-medium border flex items-center gap-1 transition-all ${
+                        onClick={() => setRebarForm({ ...rebarForm, label: name })}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-all ${
                           isSelected 
-                            ? 'bg-indigo-100 text-indigo-900 border-indigo-500 font-bold dark:bg-indigo-950 dark:text-indigo-300 shadow-sm' 
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200/80 dark:border-slate-700 hover:border-indigo-300'
+                            ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-sm' 
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200/80 dark:border-slate-700 hover:border-indigo-300 hover:text-indigo-600'
                         }`}
                       >
-                        <span className="px-1 py-0.2 bg-indigo-600 text-white rounded text-[9px] font-mono font-bold">{item.no}</span>
-                        <span>{item.name}</span>
+                        {name}
                       </button>
                     );
                   })}
@@ -3766,62 +3796,9 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                   required
                   value={rebarForm.label || ''}
                   onChange={(e) => setRebarForm({ ...rebarForm, label: e.target.value })}
-                  placeholder="เช่น เสา C1 ช่วงล่าง NO.1 หรือ เพลท P1 NO.6"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold"
+                  placeholder="พิมพ์ชื่อส่วนโครงสร้างใหม่ เช่น เสา C1, คาน B2 หรือ ตอม่อ F1"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold text-sm"
                 />
-                {/* ใต้ข้างล่าง: ล็อคเบอร์ NO ชิ้นส่วน (พิมพ์เองได้อิสระ หรือกดปุ่มด่วน) */}
-                <div className="mt-2 p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-bold text-slate-700 dark:text-slate-200 text-[11px] flex items-center gap-1">
-                      🏷️ ล็อคเบอร์ NO ชิ้นส่วน:
-                    </span>
-                    <input
-                      type="text"
-                      value={(() => {
-                        const m = (rebarForm.label || '').match(/NO[\.\s].*$/i);
-                        return m ? m[0] : '';
-                      })()}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        const m = (rebarForm.label || '').match(/NO[\.\s].*$/i);
-                        const base = m ? (rebarForm.label || '').slice(0, m.index).trim() : (rebarForm.label || '').trim();
-                        if (!val.trim()) {
-                          setRebarForm({ ...rebarForm, label: base });
-                        } else {
-                          const formatted = /^NO[\.\s]/i.test(val.trim()) ? val.trim() : `NO.${val.trim()}`;
-                          setRebarForm({ ...rebarForm, label: base ? `${base} ${formatted}` : formatted });
-                        }
-                      }}
-                      placeholder="พิมพ์เบอร์ NO เองได้ (เช่น NO.1, NO.6, NO.25)"
-                      className="px-2.5 py-1 w-56 rounded-lg border border-indigo-400 dark:border-indigo-600 bg-white dark:bg-slate-900 font-mono font-bold text-indigo-700 dark:text-indigo-300 text-xs focus:ring-2 focus:ring-indigo-500/20 outline-none shadow-sm"
-                    />
-                    <span className="text-[10px] text-slate-400">(พิมพ์เลขหรือรหัสใดก็ได้ ระบบจะล็อคต่อท้ายชื่อชิ้นส่วนอัตโนมัติ)</span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-slate-200/60 dark:border-slate-700/60 text-[10px]">
-                    <span className="text-slate-400 text-[10px]">ปุ่มด่วน:</span>
-                    {['NO.1', 'NO.2', 'NO.3', 'NO.4', 'NO.5', 'NO.6', 'NO.7', 'NO.8', 'NO.9', 'NO.10'].map((no) => {
-                      const isSelected = (rebarForm.label || '').includes(no);
-                      return (
-                        <button
-                          key={no}
-                          type="button"
-                          onClick={() => {
-                            const m = (rebarForm.label || '').match(/NO[\.\s].*$/i);
-                            const base = m ? (rebarForm.label || '').slice(0, m.index).trim() : (rebarForm.label || '').trim();
-                            setRebarForm({ ...rebarForm, label: base ? `${base} ${no}` : no });
-                          }}
-                          className={`px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border transition-colors ${
-                            isSelected
-                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
-                          }`}
-                        >
-                          {no}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
 
               {/* ========================================================
@@ -4719,8 +4696,8 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                   <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700 dark:text-slate-300">
                     <div>ตัดได้ต่อเส้น: <b>{currentCalc.piecesPerBar} ท่อน</b></div>
                     <div>ต้องใช้เส้นมาตรฐาน: <b className="text-emerald-600 dark:text-emerald-400 font-bold">{currentCalc.standardBarsNeeded} เส้น</b></div>
-                    <div>เศษเหลือต่อเส้น: <b className="text-amber-600 font-bold">{currentCalc.offcutPerBar} ม.</b></div>
-                    <div>จำนวนท่อนเศษที่เกิด: <b className="text-amber-600 font-bold">{(currentCalc.offcutPerBar > 0) ? (currentCalc.offcutQuantity || (currentCalc.piecesPerBar > 1 ? Math.max(1, Math.floor(currentCalc.standardBarsNeeded / currentCalc.piecesPerBar)) : currentCalc.standardBarsNeeded) || 1) : 0} ท่อน</b></div>
+                    <div>เศษเหลือต่อเส้น: <b className="text-amber-600 font-bold">{currentCalc.offcutDisplay || `${currentCalc.offcutPerBar} ม.`}</b></div>
+                    <div>จำนวนท่อนเศษที่เกิด: <b className="text-amber-600 font-bold">{currentCalc.offcutQuantity || 0} ท่อน</b></div>
                     <div className="col-span-2">
                       น้ำหนักวัสดุตัดใช้: <b className="text-indigo-600 dark:text-indigo-400">{currentCalc.totalWeightKg} กก.</b> ({(currentCalc.totalWeightKg / 1000).toFixed(3)} ตัน)
                     </div>

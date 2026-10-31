@@ -589,32 +589,66 @@ export function calculateRebarMetrics(data) {
   let wastePercent = 0;
   let offcutPerBar = 0;
 
+  const offcutPiecesList = [];
+  let offcutQuantity = 0;
+  let offcutDisplay = '0 ม.';
+
   if (isReused) {
     barsNeeded = 0;
     piecesPerStandardBar = 1;
     const initialOffcutLen = Number(data.offcutInitialLength) || cutLength;
     totalMaterialLength = initialOffcutLen;
-    totalOffcutLength = Math.max(0, initialOffcutLen - totalCutLength);
+    totalOffcutLength = Math.max(0, Number((initialOffcutLen - totalCutLength).toFixed(2)));
     offcutPerBar = totalOffcutLength;
     wastePercent = totalMaterialLength > 0 ? Number(((totalOffcutLength / totalMaterialLength) * 100).toFixed(1)) : 0;
+    if (totalOffcutLength > 0.05) {
+      offcutPiecesList.push({ length: totalOffcutLength, quantity: 1 });
+      offcutQuantity = 1;
+      offcutDisplay = `${totalOffcutLength} ม.`;
+    }
   } else {
-    barsNeeded = Math.ceil(quantity / piecesPerStandardBar);
+    const P = piecesPerStandardBar; // จำนวนท่อนที่ตัดได้ต่อ 1 เส้นเต็ม
+    barsNeeded = Math.ceil(quantity / P);
     totalMaterialLength = Number((barsNeeded * standardLength).toFixed(2));
+    totalCutLength = Number((quantity * cutLength).toFixed(2));
     totalOffcutLength = Number(Math.max(0, totalMaterialLength - totalCutLength).toFixed(2));
     wastePercent = totalMaterialLength > 0 ? Number(((totalOffcutLength / totalMaterialLength) * 100).toFixed(1)) : 0;
-    if (barsNeeded === 1) {
-      offcutPerBar = totalOffcutLength;
+
+    // คำนวณเศษจริงตามการตัดจริงทีละท่อน (Real Physical Cutting Calculation)
+    if (quantity % P === 0) {
+      // ทุกเส้นตัดเต็มจำนวนท่อน P เท่ากันหมด
+      const rFull = Number((standardLength - (P * cutLength)).toFixed(2));
+      if (rFull > 0.05) {
+        offcutPiecesList.push({ length: rFull, quantity: barsNeeded });
+      }
+      offcutPerBar = rFull;
     } else {
-      offcutPerBar = Number((totalOffcutLength / barsNeeded).toFixed(2));
+      // มีเส้นเต็ม และเส้นสุดท้ายที่ตัดไม่เต็ม
+      const fullBars = barsNeeded - 1;
+      const rFull = Number((standardLength - (P * cutLength)).toFixed(2));
+      if (rFull > 0.05 && fullBars > 0) {
+        offcutPiecesList.push({ length: rFull, quantity: fullBars });
+      }
+      const lastBarPieces = quantity - (fullBars * P);
+      const rLast = Number((standardLength - (lastBarPieces * cutLength)).toFixed(2));
+      if (rLast > 0.05) {
+        offcutPiecesList.push({ length: rLast, quantity: 1 });
+      }
+      offcutPerBar = rFull > 0.05 ? rFull : rLast;
+    }
+
+    offcutQuantity = offcutPiecesList.reduce((acc, o) => acc + o.quantity, 0);
+    if (offcutPiecesList.length === 0) {
+      offcutDisplay = '0 ม.';
+    } else if (offcutPiecesList.length === 1) {
+      offcutDisplay = `${offcutPiecesList[0].length} ม.`;
+    } else {
+      offcutDisplay = offcutPiecesList.map(o => `${o.length} ม. (${o.quantity} ท่อน)`).join(' + ');
     }
   }
 
   const weightKg = Number((totalCutLength * weightPerMeter).toFixed(2));
   const totalOrderWeightKg = Number((totalMaterialLength * weightPerMeter).toFixed(2));
-
-  // คำนวณจำนวนท่อนเศษ (Offcut Quantity)
-  // เช่น 12m ตัด 5.3m ได้ 2 ชิ้น/เส้น ใช้ 32 เส้น จะเกิดเศษท่อนละ 1.4m จำนวน 16 ท่อน (32 / 2)
-  const offcutQuantity = Number(data.offcutQuantity) || (piecesPerStandardBar > 1 ? Math.floor(barsNeeded / piecesPerStandardBar) : barsNeeded) || 1;
 
   return {
     ...data,
@@ -635,6 +669,8 @@ export function calculateRebarMetrics(data) {
     barsNeeded,
     offcutPerBar,
     offcutQuantity,
+    offcutPiecesList,
+    offcutDisplay,
     totalCutLength,
     totalMaterialLength,
     totalOffcutLength,
@@ -1235,19 +1271,35 @@ export const DataService = {
       writeLocalJson('rebar_items', items);
     }
 
-    // หากมีการตัดที่ทำให้เกิดเศษ และไม่ใช่การดึงเศษมาใช้ -> บันทึกเข้าคลังเศษเหล็กอัตโนมัติ
-    // โดยจำนวนท่อนเศษที่เกิด เท่ากับ calculated.offcutQuantity (เช่น 16 ท่อน)
+    // บันทึกเศษจริงเข้าคลังเศษเหล็กสะสม (ผูก sourceItemId และ rebarItemId ไว้เพื่อลบตามอัตโนมัติ)
     if (calculated.totalOffcutLength > 0 && !calculated.isReusedOffcut && calculated.materialCategory !== 'plate' && calculated.materialCategory !== 'concrete') {
-      const offcutQuantity = calculated.offcutQuantity || (calculated.piecesPerStandardBar > 1 ? Math.floor(calculated.barsNeeded / calculated.piecesPerStandardBar) : calculated.barsNeeded) || 1;
-      await this.createRebarOffcut({
-        sourceLabel: calculated.label,
-        rebarType: calculated.rebarType,
-        length: calculated.offcutPerBar || calculated.totalOffcutLength,
-        quantity: offcutQuantity,
-        unitWeight: calculated.weightPerMeter,
-        usedFor: calculated.usedFor || '',
-        rebarItemId: calculated.id
-      });
+      if (calculated.offcutPiecesList && calculated.offcutPiecesList.length > 0) {
+        for (const off of calculated.offcutPiecesList) {
+          await this.createRebarOffcut({
+            sourceLabel: calculated.label,
+            group: calculated.group,
+            rebarType: calculated.rebarType,
+            length: off.length,
+            quantity: off.quantity,
+            unitWeight: calculated.weightPerMeter,
+            usedFor: calculated.usedFor || '',
+            rebarItemId: calculated.id,
+            sourceItemId: calculated.id
+          });
+        }
+      } else if (calculated.offcutPerBar > 0) {
+        await this.createRebarOffcut({
+          sourceLabel: calculated.label,
+          group: calculated.group,
+          rebarType: calculated.rebarType,
+          length: calculated.offcutPerBar,
+          quantity: calculated.offcutQuantity || 1,
+          unitWeight: calculated.weightPerMeter,
+          usedFor: calculated.usedFor || '',
+          rebarItemId: calculated.id,
+          sourceItemId: calculated.id
+        });
+      }
     }
 
     // หากเป็นการดึงเศษที่มีอยู่มาใช้ -> ดำเนินการตัดยอดและเพิ่มเศษที่เหลือท่อนใหม่เข้าสต็อก
@@ -1294,11 +1346,33 @@ export const DataService = {
   async deleteRebarItem(id) {
     const database = await connectDB();
     if (database) {
+      const existing = await database.collection('rebar_items').findOne({ id });
       await database.collection('rebar_items').deleteOne({ id });
+      // ลบรายการเศษที่เกิดจากเหล็กเส้นรายการนี้ออกจากคลังเศษด้วยอัตโนมัติ
+      try {
+        const query = {
+          $or: [
+            { rebarItemId: id },
+            { sourceItemId: id },
+            ...(existing?.label ? [{ sourceLabel: existing.label }] : [])
+          ]
+        };
+        await database.collection('rebar_offcuts').deleteMany(query);
+      } catch (e) {
+        console.warn('Error deleting linked offcuts in db:', e.message);
+      }
       return true;
     }
     const items = readLocalJson('rebar_items', DEFAULT_REBAR_ITEMS);
+    const existing = items.find(i => i.id === id);
     writeLocalJson('rebar_items', items.filter(i => i.id !== id));
+    // ลบเศษที่เชื่อมโยงในไฟล์ JSON
+    const offcuts = readLocalJson('rebar_offcuts', DEFAULT_REBAR_OFFCUTS);
+    writeLocalJson('rebar_offcuts', offcuts.filter(o => 
+      o.rebarItemId !== id && 
+      o.sourceItemId !== id && 
+      (!existing?.label || o.sourceLabel !== existing.label)
+    ));
     return true;
   },
 
