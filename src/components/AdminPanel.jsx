@@ -3666,31 +3666,58 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                   placeholder="พิมพ์ชื่อกลุ่ม/หมวดงานใหม่ หรือเลือกจากด้านบน (เช่น ฐานราก F1 NO.1)"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold"
                 />
-                {/* ใต้ข้างล่าง: เลือกล็อคเบอร์ NO หมวดงาน */}
-                <div className="flex flex-wrap items-center gap-1.5 mt-1.5 pt-1 border-t border-slate-100 dark:border-slate-800 text-[10px]">
-                  <span className="font-bold text-slate-500 flex items-center gap-1">
-                    🏷️ ล็อคเบอร์ NO หมวด:
-                  </span>
-                  {['NO.1', 'NO.2', 'NO.3', 'NO.4', 'NO.5', 'NO.6', 'NO.7', 'NO.8'].map((no) => {
-                    const hasNo = (rebarForm.group || '').includes(no);
-                    return (
-                      <button
-                        key={no}
-                        type="button"
-                        onClick={() => {
-                          const base = (rebarForm.group || '').replace(/\s*NO\.\d+/i, '').trim();
-                          setRebarForm({ ...rebarForm, group: base ? `${base} ${no}` : no });
-                        }}
-                        className={`px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border transition-colors ${
-                          hasNo
-                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
-                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-emerald-400'
-                        }`}
-                      >
-                        {no}
-                      </button>
-                    );
-                  })}
+                {/* ใต้ข้างล่าง: ล็อคเบอร์ NO หมวดงาน (พิมพ์เองได้อิสระ หรือกดปุ่มด่วน) */}
+                <div className="mt-2 p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold text-slate-700 dark:text-slate-200 text-[11px] flex items-center gap-1">
+                      🏷️ ล็อคเบอร์ NO หมวด:
+                    </span>
+                    <input
+                      type="text"
+                      value={(() => {
+                        const m = (rebarForm.group || '').match(/NO[\.\s].*$/i);
+                        return m ? m[0] : '';
+                      })()}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const m = (rebarForm.group || '').match(/NO[\.\s].*$/i);
+                        const base = m ? (rebarForm.group || '').slice(0, m.index).trim() : (rebarForm.group || '').trim();
+                        if (!val.trim()) {
+                          setRebarForm({ ...rebarForm, group: base });
+                        } else {
+                          const formatted = /^NO[\.\s]/i.test(val.trim()) ? val.trim() : `NO.${val.trim()}`;
+                          setRebarForm({ ...rebarForm, group: base ? `${base} ${formatted}` : formatted });
+                        }
+                      }}
+                      placeholder="พิมพ์เบอร์ NO เองได้ (เช่น NO.1, NO.15, 2A)"
+                      className="px-2.5 py-1 w-56 rounded-lg border border-emerald-400 dark:border-emerald-600 bg-white dark:bg-slate-900 font-mono font-bold text-emerald-700 dark:text-emerald-300 text-xs focus:ring-2 focus:ring-emerald-500/20 outline-none shadow-sm"
+                    />
+                    <span className="text-[10px] text-slate-400">(พิมพ์เลขหรือรหัสใดก็ได้ ระบบจะล็อคต่อท้ายชื่อหมวดอัตโนมัติ)</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-slate-200/60 dark:border-slate-700/60 text-[10px]">
+                    <span className="text-slate-400 text-[10px]">ปุ่มด่วน:</span>
+                    {['NO.1', 'NO.2', 'NO.3', 'NO.4', 'NO.5', 'NO.6', 'NO.7', 'NO.8', 'NO.9', 'NO.10'].map((no) => {
+                      const isSelected = (rebarForm.group || '').includes(no);
+                      return (
+                        <button
+                          key={no}
+                          type="button"
+                          onClick={() => {
+                            const m = (rebarForm.group || '').match(/NO[\.\s].*$/i);
+                            const base = m ? (rebarForm.group || '').slice(0, m.index).trim() : (rebarForm.group || '').trim();
+                            setRebarForm({ ...rebarForm, group: base ? `${base} ${no}` : no });
+                          }}
+                          className={`px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border transition-colors ${
+                            isSelected
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-emerald-400'
+                          }`}
+                        >
+                          {no}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
@@ -3742,31 +3769,58 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                   placeholder="เช่น เสา C1 ช่วงล่าง NO.1 หรือ เพลท P1 NO.6"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold"
                 />
-                {/* ใต้ข้างล่าง: เลือกล็อคเบอร์ NO ชิ้นส่วน */}
-                <div className="flex flex-wrap items-center gap-1.5 mt-1.5 pt-1 border-t border-slate-100 dark:border-slate-800 text-[10px]">
-                  <span className="font-bold text-slate-500 flex items-center gap-1">
-                    🏷️ ล็อคเบอร์ NO ชิ้นส่วน:
-                  </span>
-                  {['NO.1', 'NO.2', 'NO.3', 'NO.4', 'NO.5', 'NO.6', 'NO.7', 'NO.8'].map((no) => {
-                    const hasNo = (rebarForm.label || '').includes(no);
-                    return (
-                      <button
-                        key={no}
-                        type="button"
-                        onClick={() => {
-                          const base = (rebarForm.label || '').replace(/\s*NO\.\d+/i, '').trim();
-                          setRebarForm({ ...rebarForm, label: base ? `${base} ${no}` : no });
-                        }}
-                        className={`px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border transition-colors ${
-                          hasNo
-                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
-                        }`}
-                      >
-                        {no}
-                      </button>
-                    );
-                  })}
+                {/* ใต้ข้างล่าง: ล็อคเบอร์ NO ชิ้นส่วน (พิมพ์เองได้อิสระ หรือกดปุ่มด่วน) */}
+                <div className="mt-2 p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold text-slate-700 dark:text-slate-200 text-[11px] flex items-center gap-1">
+                      🏷️ ล็อคเบอร์ NO ชิ้นส่วน:
+                    </span>
+                    <input
+                      type="text"
+                      value={(() => {
+                        const m = (rebarForm.label || '').match(/NO[\.\s].*$/i);
+                        return m ? m[0] : '';
+                      })()}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const m = (rebarForm.label || '').match(/NO[\.\s].*$/i);
+                        const base = m ? (rebarForm.label || '').slice(0, m.index).trim() : (rebarForm.label || '').trim();
+                        if (!val.trim()) {
+                          setRebarForm({ ...rebarForm, label: base });
+                        } else {
+                          const formatted = /^NO[\.\s]/i.test(val.trim()) ? val.trim() : `NO.${val.trim()}`;
+                          setRebarForm({ ...rebarForm, label: base ? `${base} ${formatted}` : formatted });
+                        }
+                      }}
+                      placeholder="พิมพ์เบอร์ NO เองได้ (เช่น NO.1, NO.6, NO.25)"
+                      className="px-2.5 py-1 w-56 rounded-lg border border-indigo-400 dark:border-indigo-600 bg-white dark:bg-slate-900 font-mono font-bold text-indigo-700 dark:text-indigo-300 text-xs focus:ring-2 focus:ring-indigo-500/20 outline-none shadow-sm"
+                    />
+                    <span className="text-[10px] text-slate-400">(พิมพ์เลขหรือรหัสใดก็ได้ ระบบจะล็อคต่อท้ายชื่อชิ้นส่วนอัตโนมัติ)</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-slate-200/60 dark:border-slate-700/60 text-[10px]">
+                    <span className="text-slate-400 text-[10px]">ปุ่มด่วน:</span>
+                    {['NO.1', 'NO.2', 'NO.3', 'NO.4', 'NO.5', 'NO.6', 'NO.7', 'NO.8', 'NO.9', 'NO.10'].map((no) => {
+                      const isSelected = (rebarForm.label || '').includes(no);
+                      return (
+                        <button
+                          key={no}
+                          type="button"
+                          onClick={() => {
+                            const m = (rebarForm.label || '').match(/NO[\.\s].*$/i);
+                            const base = m ? (rebarForm.label || '').slice(0, m.index).trim() : (rebarForm.label || '').trim();
+                            setRebarForm({ ...rebarForm, label: base ? `${base} ${no}` : no });
+                          }}
+                          className={`px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border transition-colors ${
+                            isSelected
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                          }`}
+                        >
+                          {no}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
