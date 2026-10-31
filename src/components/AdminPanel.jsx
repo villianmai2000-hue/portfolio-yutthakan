@@ -2456,14 +2456,14 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                             <span className="text-[10px] font-bold text-slate-400">🔩 งานเหล็กเส้น (มอก.)</span>
                           </div>
                           <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
-                            <b>วิธีใช้:</b> พิมพ์คำสั่งแล้วทำตาม 5 ขั้นตอน:
+                            <b>วิธีใช้:</b> พิมพ์คำสั่งแล้วทำตาม 5 ขั้นตอน (มีชื่อและเบอร์ NO กำกับชัดเจน):
                           </p>
                           <ul className="text-[11px] text-slate-500 space-y-1 list-disc list-inside">
-                            <li><b>ขั้นตอน 1:</b> เลือกกลุ่ม/หมวดงาน (กด 1 เพื่อเลื่อนเลือกในระบบ หรือกด 0 พิมพ์ชื่อใหม่)</li>
-                            <li><b>ขั้นตอน 2:</b> ระบุชื่อส่วนโครงสร้าง (กด 1 เพื่อเลื่อนเลือกในระบบ หรือกด 0 พิมพ์ชื่อใหม่)</li>
-                            <li><b>ขั้นตอน 3:</b> เลือกขนาดเหล็ก (RB6-RB12, DB10-DB40 กด 1 เลื่อนเลือก) หรือกด 00 ดึงเศษในสต็อก</li>
-                            <li><b>ขั้นตอน 4:</b> เลือกความยาวมาตรฐานที่นำมาตัด (10.0m หรือ 12.0m)</li>
-                            <li><b>ขั้นตอน 5:</b> ระบุความยาวที่ตัดใช้จริง (เมตร) และจำนวนท่อนที่ต้องการตัด</li>
+                            <li><b>ขั้นตอนที่ 1/5: เลือกกลุ่ม / หมวดงาน:</b> กดเบอร์ NO เช่น 1=NO.1 ฐานราก, 2=NO.2 เสา หรือกด 0 พิมพ์ใหม่</li>
+                            <li><b>ขั้นตอนที่ 2/5: ระบุชื่อส่วนโครงสร้าง:</b> กดเบอร์ NO เช่น 1=NO.1 เสา C1, 2=NO.2 เสา C2 หรือกด 0 พิมพ์ใหม่</li>
+                            <li><b>ขั้นตอนที่ 3/5: เลือกขนาดเหล็กเส้น:</b> พิมพ์หมายเลข [1-11], พิมพ์ขนาดเช่น DB20 หรือกด 99 ดึงเศษสต็อก</li>
+                            <li><b>ขั้นตอนที่ 4/5: ความยาวมาตรฐานที่นำมาตัด:</b> เลือกความยาวมาตรฐาน [1]=10.0m หรือ [2]=12.0m</li>
+                            <li><b>ขั้นตอนที่ 5/5: ระบุความยาวตัดใช้จริง และจำนวนท่อน:</b> ระบุความยาวตัดใช้จริง (ม.) และจำนวนท่อนที่ต้องการตัด</li>
                           </ul>
                         </div>
 
@@ -3620,50 +3620,154 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
 
             <form onSubmit={handleSaveRebar} className="p-5 overflow-y-auto space-y-4 text-xs">
               
-              {/* กลุ่ม/หมวดงาน (Common Field) */}
+              {/* กลุ่ม/หมวดงาน (Common Field) พร้อมระบบเบอร์ NO */}
               <div>
-                <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
-                  🏗️ กลุ่ม / หมวดงาน (เช่น ฐานราก F1, งานเสา, งานคาน, งานโครงหลังคาเหล็ก)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    🏗️ กลุ่ม / หมวดงาน (เช่น ฐานราก F1, งานเสา, งานคาน, งานโครงหลังคาเหล็ก)
+                  </label>
+                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800/40">
+                    ล็อคเบอร์ NO สำหรับ AutoCAD
+                  </span>
+                </div>
                 <div className="flex flex-wrap gap-1 mb-1.5">
-                  {['ฐานราก F1', 'งานเสา', 'งานคาน', 'งานพื้น', 'งานโครงสร้างเหล็ก', 'งานสุขาภิบาล/ท่อ'].map(g => (
-                    <button
-                      key={g}
-                      type="button"
-                      onClick={() => setRebarForm({ ...rebarForm, group: g })}
-                      className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
-                        rebarForm.group === g 
-                          ? 'bg-emerald-100 text-emerald-800 border-emerald-400 dark:bg-emerald-950 dark:text-emerald-300' 
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-transparent'
-                      }`}
-                    >
-                      {g}
-                    </button>
-                  ))}
+                  {[
+                    { no: 'NO.1', name: 'ฐานราก F1' },
+                    { no: 'NO.2', name: 'งานเสา' },
+                    { no: 'NO.3', name: 'งานคาน' },
+                    { no: 'NO.4', name: 'งานพื้น' },
+                    { no: 'NO.5', name: 'งานโครงสร้างเหล็ก' },
+                    { no: 'NO.6', name: 'งานสุขาภิบาล/ท่อ' }
+                  ].map(item => {
+                    const fullText = `${item.name} ${item.no}`;
+                    const isSelected = rebarForm.group === fullText || rebarForm.group === item.name;
+                    return (
+                      <button
+                        key={item.no}
+                        type="button"
+                        onClick={() => setRebarForm({ ...rebarForm, group: fullText })}
+                        className={`px-2 py-0.5 rounded text-[10px] font-medium border flex items-center gap-1 transition-all ${
+                          isSelected 
+                            ? 'bg-emerald-100 text-emerald-900 border-emerald-500 font-bold dark:bg-emerald-950 dark:text-emerald-300 shadow-sm' 
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200/80 dark:border-slate-700 hover:border-emerald-300'
+                        }`}
+                      >
+                        <span className="px-1 py-0.2 bg-emerald-600 text-white rounded text-[9px] font-mono font-bold">{item.no}</span>
+                        <span>{item.name}</span>
+                      </button>
+                    );
+                  })}
                 </div>
                 <input
                   type="text"
                   required
                   value={rebarForm.group || ''}
                   onChange={(e) => setRebarForm({ ...rebarForm, group: e.target.value })}
-                  placeholder="พิมพ์ชื่อกลุ่ม/หมวดงานใหม่ หรือเลือกจากด้านบน"
+                  placeholder="พิมพ์ชื่อกลุ่ม/หมวดงานใหม่ หรือเลือกจากด้านบน (เช่น ฐานราก F1 NO.1)"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold"
                 />
+                {/* ใต้ข้างล่าง: เลือกล็อคเบอร์ NO หมวดงาน */}
+                <div className="flex flex-wrap items-center gap-1.5 mt-1.5 pt-1 border-t border-slate-100 dark:border-slate-800 text-[10px]">
+                  <span className="font-bold text-slate-500 flex items-center gap-1">
+                    🏷️ ล็อคเบอร์ NO หมวด:
+                  </span>
+                  {['NO.1', 'NO.2', 'NO.3', 'NO.4', 'NO.5', 'NO.6', 'NO.7', 'NO.8'].map((no) => {
+                    const hasNo = (rebarForm.group || '').includes(no);
+                    return (
+                      <button
+                        key={no}
+                        type="button"
+                        onClick={() => {
+                          const base = (rebarForm.group || '').replace(/\s*NO\.\d+/i, '').trim();
+                          setRebarForm({ ...rebarForm, group: base ? `${base} ${no}` : no });
+                        }}
+                        className={`px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border transition-colors ${
+                          hasNo
+                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-emerald-400'
+                        }`}
+                      >
+                        {no}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              {/* ชื่อส่วนโครงสร้าง (Common Field) */}
+              {/* ชื่อส่วนโครงสร้าง (Common Field) พร้อมระบบเบอร์ NO */}
               <div>
-                <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
-                  📌 ชื่อส่วนโครงสร้าง (เช่น เสา C1 ช่วงล่าง, คาน B2, เพลทหัวเสา P1, แปหลังคา Purlin)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    📌 ชื่อส่วนโครงสร้าง (เช่น เสา C1 ช่วงล่าง, คาน B2, เพลทหัวเสา P1, แปหลังคา Purlin)
+                  </label>
+                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800/40">
+                    ล็อคเบอร์ NO สำหรับ AutoCAD
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1 mb-1.5">
+                  {[
+                    { no: 'NO.1', name: 'เสา C1 ช่วงล่าง' },
+                    { no: 'NO.2', name: 'เสา C2' },
+                    { no: 'NO.3', name: 'คาน B1' },
+                    { no: 'NO.4', name: 'คาน B2' },
+                    { no: 'NO.5', name: 'ฐานราก F1' },
+                    { no: 'NO.6', name: 'เพลทหัวเสา P1' },
+                    { no: 'NO.7', name: 'แปหลังคา C1' },
+                    { no: 'NO.8', name: 'พื้นคอนกรีต S1' }
+                  ].map(item => {
+                    const fullText = `${item.name} ${item.no}`;
+                    const isSelected = rebarForm.label === fullText || rebarForm.label === item.name;
+                    return (
+                      <button
+                        key={item.no}
+                        type="button"
+                        onClick={() => setRebarForm({ ...rebarForm, label: fullText })}
+                        className={`px-2 py-0.5 rounded text-[10px] font-medium border flex items-center gap-1 transition-all ${
+                          isSelected 
+                            ? 'bg-indigo-100 text-indigo-900 border-indigo-500 font-bold dark:bg-indigo-950 dark:text-indigo-300 shadow-sm' 
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200/80 dark:border-slate-700 hover:border-indigo-300'
+                        }`}
+                      >
+                        <span className="px-1 py-0.2 bg-indigo-600 text-white rounded text-[9px] font-mono font-bold">{item.no}</span>
+                        <span>{item.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
                 <input
                   type="text"
                   required
                   value={rebarForm.label || ''}
                   onChange={(e) => setRebarForm({ ...rebarForm, label: e.target.value })}
-                  placeholder="เช่น เสา C1 ช่วงล่าง หรือ เพลท P1"
+                  placeholder="เช่น เสา C1 ช่วงล่าง NO.1 หรือ เพลท P1 NO.6"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold"
                 />
+                {/* ใต้ข้างล่าง: เลือกล็อคเบอร์ NO ชิ้นส่วน */}
+                <div className="flex flex-wrap items-center gap-1.5 mt-1.5 pt-1 border-t border-slate-100 dark:border-slate-800 text-[10px]">
+                  <span className="font-bold text-slate-500 flex items-center gap-1">
+                    🏷️ ล็อคเบอร์ NO ชิ้นส่วน:
+                  </span>
+                  {['NO.1', 'NO.2', 'NO.3', 'NO.4', 'NO.5', 'NO.6', 'NO.7', 'NO.8'].map((no) => {
+                    const hasNo = (rebarForm.label || '').includes(no);
+                    return (
+                      <button
+                        key={no}
+                        type="button"
+                        onClick={() => {
+                          const base = (rebarForm.label || '').replace(/\s*NO\.\d+/i, '').trim();
+                          setRebarForm({ ...rebarForm, label: base ? `${base} ${no}` : no });
+                        }}
+                        className={`px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border transition-colors ${
+                          hasNo
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                        }`}
+                      >
+                        {no}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* ========================================================

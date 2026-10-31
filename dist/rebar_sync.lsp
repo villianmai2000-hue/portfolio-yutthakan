@@ -1,7 +1,8 @@
 ;;; =========================================================================
-;;; AutoLISP: Yutthakan Structural Material Takeoff & BBS Live Sync v5.0
+;;; AutoLISP: Yutthakan Structural Material Takeoff & BBS Live Sync v5.5
 ;;; สถาปนิกและวิศวกรโครงสร้าง: ยุทธการ คำกลอน
 ;;; รองรับ 10 หมวดคำสั่งถอดแบบโครงสร้าง ซิงก์ขึ้นเว็บแบบเรียลไทม์
+;;; ล็อคเบอร์ NO หมวดและชิ้นส่วนเพื่อความสะดวกรวดเร็วใน AutoCAD
 ;;; =========================================================================
 (vl-load-com)
 
@@ -10,7 +11,7 @@
   (setq *rebar-groups* (list "ฐานราก F1" "งานเสา" "งานคาน" "งานพื้น" "งานโครงสร้างเหล็ก" "งานสุขาภิบาล/ท่อ" "F1-C1 NO.1" "F2-C2A NO.2"))
 )
 (if (null *rebar-members*)
-  (setq *rebar-members* (list "เสา C1" "เสา C2" "คาน B1" "คาน B2" "ฐานราก F1" "เหล็กเสริมเสา" "เพลท P1" "แป C1" "พื้น S1"))
+  (setq *rebar-members* (list "เสา C1 ช่วงล่าง" "เสา C2" "คาน B1" "คาน B2" "ฐานราก F1" "เหล็กเสริมเสา" "เพลทหัวเสา P1" "แปหลังคา C1" "พื้นคอนกรีต S1"))
 )
 
 ;;; ฟังก์ชันช่วยแยกข้อความ (String Split)
@@ -43,129 +44,110 @@
 )
 
 ;;; =========================================================================
-;;; ขั้นตอนที่ 1: เลือกกลุ่ม / หมวดงาน (กด 1 เลื่อนเลือกในระบบ / กด 0 พิมพ์ชื่อใหม่)
+;;; ขั้นตอนที่ 1/5: เลือกกลุ่ม / หมวดงาน (Group / Category)
+;;; ล็อคตามเบอร์ NO เพื่อเลือกได้ง่ายและรวดเร็ว
 ;;; =========================================================================
-(defun rebar-step1-group (/ inp grp i sel idx maxN)
+(defun rebar-step1-group (/ inp grp i sel idx maxN baseName itemText)
   (princ "\n=======================================================")
-  (princ "\nขั้นตอนที่ 1/5: เลือกกลุ่ม / หมวดงาน")
-  (princ "\n  [1] เลื่อนเลือกหมวดในระบบ (ฐานราก, เสา, คาน, งานพื้น...)")
-  (princ "\n  [0] พิมพ์ชื่อกลุ่ม/หมวดงานใหม่เอง")
+  (princ "\nขั้นตอนที่ 1/5: เลือกกลุ่ม / หมวดงาน (Group / Category)")
   (princ "\n=======================================================")
-  (setq inp (getstring T "\nเลือก [กด 1 เลือกในระบบ / กด 0 พิมพ์ใหม่] <1>: "))
-  (setq inp (vl-string-trim " \t\r\n" inp))
-  (cond
-    ((= inp "0")
-      (setq grp (getstring T "\nระบุชื่อกลุ่ม/หมวดงานใหม่: "))
-      (setq grp (vl-string-trim " \t\r\n" grp))
-      (if (= grp "") (setq grp "งานโครงสร้างทั่วไป"))
-      (if (not (member grp *rebar-groups*))
-        (setq *rebar-groups* (cons grp *rebar-groups*))
-      )
-    )
-    (t
-      (princ "\n--- รายการกลุ่ม/หมวดงานในระบบ ---")
-      (setq maxN (min (length *rebar-groups*) 8))
-      (setq i 0)
-      (while (< i maxN)
-        (princ (strcat "\n  [" (itoa (1+ i)) "] " (nth i *rebar-groups*)))
-        (setq i (1+ i))
-      )
-      (setq sel (getstring T (strcat "\nเลือกหมายเลขหมวด [1-" (itoa maxN) "] หรือกด 0 พิมพ์ใหม่ <1>: ")))
-      (setq sel (vl-string-trim " \t\r\n" sel))
-      (cond
-        ((= sel "0")
-          (setq grp (getstring T "\nระบุชื่อกลุ่ม/หมวดงานใหม่: "))
-          (setq grp (vl-string-trim " \t\r\n" grp))
-          (if (= grp "") (setq grp (car *rebar-groups*)))
-          (if (not (member grp *rebar-groups*)) (setq *rebar-groups* (cons grp *rebar-groups*)))
-        )
-        ((or (= sel "") (= sel "1"))
-          (setq grp (car *rebar-groups*))
-        )
-        ((and (> (strlen sel) 0) (vl-every '(lambda (c) (and (>= c 48) (<= c 57))) (vl-string->list sel)))
-          (setq idx (atoi sel))
-          (if (and (> idx 0) (<= idx (length *rebar-groups*)))
-            (setq grp (nth (1- idx) *rebar-groups*))
-            (setq grp (car *rebar-groups*))
-          )
-        )
-        (t (setq grp sel))
-      )
-    )
+  (princ "\nรายการกลุ่ม/หมวดงานในระบบ (ล็อคตามเบอร์ NO):")
+  (setq maxN (min (length *rebar-groups*) 10))
+  (setq i 0)
+  (while (< i maxN)
+    (setq baseName (nth i *rebar-groups*))
+    (princ (strcat "\n  [NO." (itoa (1+ i)) "] " baseName))
+    (setq i (1+ i))
   )
-  (princ (strcat "\n[✓] กลุ่ม/หมวดงาน: " grp))
+  (princ "\n  [0] พิมพ์ชื่อกลุ่ม/หมวดงานใหม่เอง")
+  (setq sel (getstring T (strcat "\nเลือกกดเบอร์ NO [1-" (itoa maxN) "] หรือกด 0 พิมพ์ใหม่ <1>: ")))
+  (setq sel (vl-string-trim " \t\r\n" sel))
+  (cond
+    ((= sel "0")
+      (setq grp (getstring T "\nระบุชื่อกลุ่ม/หมวดงานใหม่ (ใส่เบอร์ NO ได้ เช่น F1-C1 NO.1): "))
+      (setq grp (vl-string-trim " \t\r\n" grp))
+      (if (= grp "") (setq grp "งานโครงสร้างทั่วไป NO.1"))
+      (if (not (member grp *rebar-groups*))
+        (setq *rebar-groups* (append *rebar-groups* (list grp)))
+      )
+    )
+    ((or (= sel "") (= sel "1"))
+      (setq grp (strcat (car *rebar-groups*) " NO.1"))
+    )
+    ((and (> (strlen sel) 0) (vl-every '(lambda (c) (and (>= c 48) (<= c 57))) (vl-string->list sel)))
+      (setq idx (atoi sel))
+      (if (and (> idx 0) (<= idx (length *rebar-groups*)))
+        (setq grp (strcat (nth (1- idx) *rebar-groups*) " NO." (itoa idx)))
+        (setq grp (strcat (car *rebar-groups*) " NO.1"))
+      )
+    )
+    (t (setq grp sel))
+  )
+  (princ (strcat "\n[✓ ล็อคหมวดงาน]: " grp))
   grp
 )
 
 ;;; =========================================================================
-;;; ขั้นตอนที่ 2: ระบุชื่อส่วนโครงสร้าง (กด 1 เลื่อนเลือกในระบบ / กด 0 พิมพ์ชื่อใหม่)
+;;; ขั้นตอนที่ 2/5: ระบุชื่อส่วนโครงสร้าง (Structural Member)
+;;; ล็อคตามเบอร์ NO เพื่อเลือกได้ง่ายและรวดเร็ว
 ;;; =========================================================================
-(defun rebar-step2-member (/ inp mem i sel idx maxN)
+(defun rebar-step2-member (/ inp mem i sel idx maxN baseName)
   (princ "\n-------------------------------------------------------")
-  (princ "\nขั้นตอนที่ 2/5: ระบุชื่อส่วนโครงสร้าง")
-  (princ "\n  [1] เลื่อนเลือกชื่อส่วนในระบบ (เช่น เสา C1, คาน B2, ฐานราก F1...)")
-  (princ "\n  [0] พิมพ์ชื่อส่วนโครงสร้างใหม่เอง")
+  (princ "\nขั้นตอนที่ 2/5: ระบุชื่อส่วนโครงสร้าง (Structural Member)")
   (princ "\n-------------------------------------------------------")
-  (setq inp (getstring T "\nเลือก [กด 1 เลือกในระบบ / กด 0 พิมพ์ใหม่] <1>: "))
-  (setq inp (vl-string-trim " \t\r\n" inp))
-  (cond
-    ((= inp "0")
-      (setq mem (getstring T "\nระบุชื่อส่วนโครงสร้างใหม่ (เช่น เสา C1, คาน B2): "))
-      (setq mem (vl-string-trim " \t\r\n" mem))
-      (if (= mem "") (setq mem "ชิ้นส่วน"))
-      (if (not (member mem *rebar-members*))
-        (setq *rebar-members* (cons mem *rebar-members*))
-      )
-    )
-    (t
-      (princ "\n--- รายการชื่อส่วนโครงสร้างในระบบ ---")
-      (setq maxN (min (length *rebar-members*) 9))
-      (setq i 0)
-      (while (< i maxN)
-        (princ (strcat "\n  [" (itoa (1+ i)) "] " (nth i *rebar-members*)))
-        (setq i (1+ i))
-      )
-      (setq sel (getstring T (strcat "\nเลือกหมายเลข [1-" (itoa maxN) "] หรือกด 0 พิมพ์ใหม่ <1>: ")))
-      (setq sel (vl-string-trim " \t\r\n" sel))
-      (cond
-        ((= sel "0")
-          (setq mem (getstring T "\nระบุชื่อส่วนโครงสร้างใหม่: "))
-          (setq mem (vl-string-trim " \t\r\n" mem))
-          (if (= mem "") (setq mem (car *rebar-members*)))
-          (if (not (member mem *rebar-members*)) (setq *rebar-members* (cons mem *rebar-members*)))
-        )
-        ((or (= sel "") (= sel "1"))
-          (setq mem (car *rebar-members*))
-        )
-        ((and (> (strlen sel) 0) (vl-every '(lambda (c) (and (>= c 48) (<= c 57))) (vl-string->list sel)))
-          (setq idx (atoi sel))
-          (if (and (> idx 0) (<= idx (length *rebar-members*)))
-            (setq mem (nth (1- idx) *rebar-members*))
-            (setq mem (car *rebar-members*))
-          )
-        )
-        (t (setq mem sel))
-      )
-    )
+  (princ "\nรายการชื่อส่วนโครงสร้างในระบบ (ล็อคตามเบอร์ NO):")
+  (setq maxN (min (length *rebar-members*) 10))
+  (setq i 0)
+  (while (< i maxN)
+    (setq baseName (nth i *rebar-members*))
+    (princ (strcat "\n  [NO." (itoa (1+ i)) "] " baseName))
+    (setq i (1+ i))
   )
-  (princ (strcat "\n[✓] ชื่อส่วนโครงสร้าง: " mem))
+  (princ "\n  [0] พิมพ์ชื่อส่วนโครงสร้างใหม่เอง")
+  (setq sel (getstring T (strcat "\nเลือกกดเบอร์ NO [1-" (itoa maxN) "] หรือกด 0 พิมพ์ใหม่ <1>: ")))
+  (setq sel (vl-string-trim " \t\r\n" sel))
+  (cond
+    ((= sel "0")
+      (setq mem (getstring T "\nระบุชื่อส่วนโครงสร้างใหม่ (เช่น เสา C1 ช่วงล่าง, คาน B2): "))
+      (setq mem (vl-string-trim " \t\r\n" mem))
+      (if (= mem "") (setq mem "ชิ้นส่วน NO.1"))
+      (if (not (member mem *rebar-members*))
+        (setq *rebar-members* (append *rebar-members* (list mem)))
+      )
+    )
+    ((or (= sel "") (= sel "1"))
+      (setq mem (strcat (car *rebar-members*) " NO.1"))
+    )
+    ((and (> (strlen sel) 0) (vl-every '(lambda (c) (and (>= c 48) (<= c 57))) (vl-string->list sel)))
+      (setq idx (atoi sel))
+      (if (and (> idx 0) (<= idx (length *rebar-members*)))
+        (setq mem (strcat (nth (1- idx) *rebar-members*) " NO." (itoa idx)))
+        (setq mem (strcat (car *rebar-members*) " NO.1"))
+      )
+    )
+    (t (setq mem sel))
+  )
+  (princ (strcat "\n[✓ ล็อคชิ้นส่วน]: " mem))
   mem
 )
 
 ;;; =========================================================================
-;;; ขั้นตอนที่ 3: เลือกขนาดเหล็ก (RB6-RB12, DB10-DB40 กด 1) หรือกด 00 ดึงเศษสต็อก
+;;; ขั้นตอนที่ 3/5: เลือกขนาดเหล็กเส้น (Rebar Size - มอก. 24-2559 / 20-2559)
+;;; แสดงขนาดทั้งหมดทันที ไม่ต้องกด 1 หรือกด 00 ก่อน
 ;;; คืนค่า list: (bartype isOffcut offcutSourceLength)
 ;;; =========================================================================
-(defun rebar-step3-rebar-size (/ inp chosen sz offIdx chosenOffcutLen bartype)
+(defun rebar-step3-rebar-size (/ chosen sz offIdx chosenOffcutLen bartype)
   (princ "\n-------------------------------------------------------")
-  (princ "\nขั้นตอนที่ 3/5: เลือกขนาดเหล็กเส้น (มอก.) หรือดึงเศษสต็อก")
-  (princ "\n  [1]  เลื่อนเลือกขนาดเหล็ก (RB6-RB12, DB10-DB40)")
-  (princ "\n  [00] ดึงเศษในสต็อกมาใช้แทนเส้นใหม่")
+  (princ "\nขั้นตอนที่ 3/5: เลือกขนาดเหล็กเส้น (Rebar Size - มอก. 24-2559 / 20-2559)")
+  (princ "\n  [1]=RB6    [2]=RB9    [3]=RB12")
+  (princ "\n  [4]=DB10   [5]=DB12   [6]=DB16   [7]=DB20")
+  (princ "\n  [8]=DB25   [9]=DB28   [10]=DB32  [11]=DB40")
+  (princ "\n  [99]=ดึงเศษในสต็อกมาใช้แทนเส้นใหม่")
   (princ "\n-------------------------------------------------------")
-  (setq inp (getstring T "\nเลือก [กด 1 เลือกขนาดเหล็ก / กด 00 ดึงเศษสต็อก] <1>: "))
-  (setq inp (vl-string-trim " \t\r\n" inp))
+  (setq chosen (getstring T "\nเลือกหมายเลข [1-11], พิมพ์ขนาด (เช่น DB20) หรือกด 99 ดึงเศษสต็อก <7=DB20>: "))
+  (setq chosen (vl-string-trim " \t\r\n" chosen))
 
-  (if (or (= inp "00") (= inp "99"))
+  (if (or (= chosen "99") (= chosen "00") (= (strcase chosen) "OFFCUT") (= (strcase chosen) "เศษ"))
     ;; กรณีดึงเศษสต็อกมาใช้
     (progn
       (princ "\n--- ดึงเศษเหล็กในสต็อกมาใช้ใหม่ ---")
@@ -207,16 +189,11 @@
           (t 1.40)
         )
       )
-      (princ (strcat "\n[✓] ดึงเศษ " bartype " ยาว " (rtos chosenOffcutLen 2 2) " ม. มาใช้"))
+      (princ (strcat "\n[✓ ดึงเศษสต็อก]: " bartype " ยาว " (rtos chosenOffcutLen 2 2) " ม."))
       (list bartype "true" chosenOffcutLen)
     )
-    ;; กรณีเลือกเหล็กเส้นมาตรฐาน
+    ;; กรณีเลือกเหล็กเส้นมาตรฐานปกติ
     (progn
-      (princ "\n--- รายการขนาดเหล็กเส้น มอก. ---")
-      (princ "\n  [1]=RB6    [2]=RB9    [3]=RB12")
-      (princ "\n  [4]=DB10   [5]=DB12   [6]=DB16   [7]=DB20   [8]=DB25   [9]=DB28   [10]=DB32  [11]=DB40")
-      (setq chosen (getstring T "\nเลือกหมายเลข [1-11] หรือพิมพ์ขนาด (เช่น DB20) <DB20>: "))
-      (setq chosen (vl-string-trim " \t\r\n" chosen))
       (setq bartype
         (cond
           ((or (= chosen "") (= chosen "7") (= (strcase chosen) "DB20")) "DB20")
@@ -233,59 +210,59 @@
           (t (strcase chosen))
         )
       )
-      (princ (strcat "\n[✓] ขนาดเหล็ก: " bartype))
+      (princ (strcat "\n[✓ ขนาดเหล็กที่เลือก]: " bartype))
       (list bartype "false" 12.0)
     )
   )
 )
 
 ;;; =========================================================================
-;;; ขั้นตอนที่ 4: ความยาวมาตรฐานที่นำมาตัด (10.0m หรือ 12.0m)
+;;; ขั้นตอนที่ 4/5: ความยาวมาตรฐานที่นำมาตัด (Standard Length - 10m / 12m)
 ;;; =========================================================================
 (defun rebar-step4-stdlen (isOffcut offcutLen / stdIdx stdlen)
   (if (= isOffcut "true")
     (progn
       (setq stdlen offcutLen)
-      (princ (strcat "\n[✓] ความยาวท่อนเศษที่นำมาตัด: " (rtos stdlen 2 2) " ม."))
+      (princ (strcat "\n[✓ ความยาวท่อนเศษที่นำมาตัด]: " (rtos stdlen 2 2) " ม."))
       stdlen
     )
     (progn
       (princ "\n-------------------------------------------------------")
-      (princ "\nขั้นตอนที่ 4/5: เลือกความยาวมาตรฐานที่นำมาตัด")
+      (princ "\nขั้นตอนที่ 4/5: เลือกความยาวมาตรฐานที่นำมาตัด (Standard Length)")
       (princ "\n  [1] 10.0 เมตร")
       (princ "\n  [2] 12.0 เมตร (สเปกมาตรฐานทั่วไป)")
       (princ "\n-------------------------------------------------------")
-      (setq stdIdx (getstring T "\nเลือก [1=10.0m / 2=12.0m] <2>: "))
+      (setq stdIdx (getstring T "\nเลือกความยาวมาตรฐาน [1=10.0m / 2=12.0m] <2>: "))
       (setq stdIdx (vl-string-trim " \t\r\n" stdIdx))
       (if (= stdIdx "1") (setq stdlen 10.0) (setq stdlen 12.0))
-      (princ (strcat "\n[✓] ความยาวมาตรฐาน: " (rtos stdlen 2 1) " ม."))
+      (princ (strcat "\n[✓ ความยาวมาตรฐาน]: " (rtos stdlen 2 1) " ม."))
       stdlen
     )
   )
 )
 
 ;;; =========================================================================
-;;; ขั้นตอนที่ 5: ระบุความยาวที่ตัดใช้จริง (เมตร) และจำนวนท่อนที่ต้องการตัด
+;;; ขั้นตอนที่ 5/5: ระบุความยาวตัดใช้จริง และจำนวนท่อนที่ต้องการ (Cutting Length & Quantity)
 ;;; =========================================================================
 (defun rebar-step5-cut-qty (/ cut qty cutInp qtyInp)
   (princ "\n-------------------------------------------------------")
-  (princ "\nขั้นตอนที่ 5/5: ระบุความยาวที่ตัดใช้จริง และจำนวนท่อน")
+  (princ "\nขั้นตอนที่ 5/5: ระบุความยาวตัดใช้จริง และจำนวนท่อนที่ต้องการ (Cut Length & Qty)")
   (princ "\n-------------------------------------------------------")
-  (setq cutInp (getstring T "\n[1/2] ความยาวที่ตัดใช้จริง (เมตร) <6.0>: "))
+  (setq cutInp (getstring T "\n[5.1] ระบุความยาวที่ตัดใช้จริง (เมตร) <6.0>: "))
   (setq cutInp (vl-string-trim " \t\r\n" cutInp))
   (if (or (= cutInp "") (<= (atof cutInp) 0.0))
     (setq cut 6.0)
     (setq cut (atof cutInp))
   )
 
-  (setq qtyInp (getstring T "\n[2/2] จำนวนท่อนที่ต้องการตัด (ท่อน) <1>: "))
+  (setq qtyInp (getstring T "\n[5.2] ระบุจำนวนท่อนที่ต้องการตัด (ท่อน) <1>: "))
   (setq qtyInp (vl-string-trim " \t\r\n" qtyInp))
   (if (or (= qtyInp "") (<= (atoi qtyInp) 0))
     (setq qty 1)
     (setq qty (atoi qtyInp))
   )
 
-  (princ (strcat "\n[✓] ตัดยาว " (rtos cut 2 2) " ม. จำนวน " (itoa qty) " ท่อน"))
+  (princ (strcat "\n[✓ ตัดใช้จริง]: ยาว " (rtos cut 2 2) " ม. จำนวน " (itoa qty) " ท่อน"))
   (list cut qty)
 )
 
@@ -349,22 +326,22 @@
   (princ "\n  [AutoCAD] ถอดเหล็กเส้นเสริมคอนกรีต (BBS Live Sync)")
   (princ "\n=======================================================")
 
-  ;; ขั้นตอน 1: เลือกกลุ่ม/หมวดงาน (กด 1 เลื่อนเลือก / กด 0 พิมพ์ใหม่)
+  ;; ขั้นตอนที่ 1/5: เลือกกลุ่ม / หมวดงาน (ล็อคตามเบอร์ NO)
   (setq grp (rebar-step1-group))
 
-  ;; ขั้นตอน 2: ระบุชื่อส่วนโครงสร้าง (กด 1 เลื่อนเลือก / กด 0 พิมพ์ใหม่)
+  ;; ขั้นตอนที่ 2/5: ระบุชื่อส่วนโครงสร้าง (ล็อคตามเบอร์ NO)
   (setq mem (rebar-step2-member))
 
-  ;; ขั้นตอน 3: เลือกขนาดเหล็ก หรือกด 00 ดึงเศษสต็อก
+  ;; ขั้นตอนที่ 3/5: เลือกขนาดเหล็กเส้น (แสดงขนาดให้เลือกโดยตรง)
   (setq step3Res (rebar-step3-rebar-size))
   (setq bartype (nth 0 step3Res))
   (setq isOffcut (nth 1 step3Res))
   (setq offcutSourceLen (nth 2 step3Res))
 
-  ;; ขั้นตอน 4: ความยาวมาตรฐานที่นำมาตัด (10m หรือ 12m)
+  ;; ขั้นตอนที่ 4/5: ความยาวมาตรฐานที่นำมาตัด (10m หรือ 12m)
   (setq stdlen (rebar-step4-stdlen isOffcut offcutSourceLen))
 
-  ;; ขั้นตอน 5: ระบุความยาวที่ตัดใช้จริง และจำนวนท่อนที่ต้องการตัด
+  ;; ขั้นตอนที่ 5/5: ระบุความยาวตัดใช้จริง และจำนวนท่อนที่ต้องการ
   (setq step5Res (rebar-step5-cut-qty))
   (setq cut (nth 0 step5Res))
   (setq qty (nth 1 step5Res))
@@ -380,12 +357,15 @@
   (setq offcutPerBar (- stdlen (* cut pieces)))
 
   (princ "\n-------------------------------------------------------")
+  (princ "\n[ผลคำนวณ BBS ใน AutoCAD]:")
+  (princ (strcat "\n  - หมวดงาน: " grp))
+  (princ (strcat "\n  - ส่วนโครงสร้าง: " mem))
   (if (= isOffcut "true")
-    (princ (strcat "\n[ผลคำนวณ]: ดึงเศษในสต็อกยาว " (rtos stdlen 2 2) "m มาตัด " (itoa qty) " ท่อน (ตัดยาว " (rtos cut 2 2) "ม.)"))
-    (princ (strcat "\n[ผลคำนวณ]: ใช้เหล็ก " (rtos stdlen 2 1) "m จำนวน " (itoa barsNeeded) " เส้น | 1 เส้นตัดได้ " (itoa pieces) " ท่อน"))
+    (princ (strcat "\n  - ดึงเศษสต็อก: " bartype " ยาว " (rtos stdlen 2 2) "m ตัดใช้ " (rtos cut 2 2) "ม. จำนวน " (itoa qty) " ท่อน"))
+    (princ (strcat "\n  - สรุปสั่งเหล็ก: " bartype " (" (rtos stdlen 2 1) "m) ทั้งหมด " (itoa barsNeeded) " เส้น | 1 เส้นตัดได้ " (itoa pieces) " ท่อน"))
   )
   (if (> offcutPerBar 0.05)
-    (princ (strcat "\n[เศษเหลือ]: ท่อนละ " (rtos offcutPerBar 2 2) " ม. จำนวน " (itoa offcutQty) " ท่อน"))
+    (princ (strcat "\n  - ท่อนเศษคงเหลือ: ท่อนละ " (rtos offcutPerBar 2 2) " ม. จำนวน " (itoa offcutQty) " ท่อน"))
   )
   (princ "\n-------------------------------------------------------")
 
@@ -671,7 +651,7 @@
   (princ "\n=======================================================")
   (princ "\n      เมนูระบบถอดแบบโครงสร้าง & Live Sync (AutoCAD)   ")
   (princ "\n=======================================================")
-  (princ "\n  [1] REBAR_SYNC    - ถอดเหล็กเส้น 5 ขั้นตอน (กด 1 เลื่อนเลือก / กด 0 พิมพ์ใหม่ / กด 00 ดึงเศษ)")
+  (princ "\n  [1] REBAR_SYNC    - ถอดเหล็กเส้น 5 ขั้นตอน (ล็อค NO หมวด & ชิ้นส่วน)")
   (princ "\n  [2] SYNC_CONCRETE - คิดปริมาณปูนคอนกรีต (คิว m³, เผื่อเท Slump)")
   (princ "\n  [3] SYNC_BEAM     - ถอดเหล็กบีม (H-Beam / I-Beam / WF)")
   (princ "\n  [4] SYNC_PLATE    - ถอดเหล็กเพลท & J-Bolt หัวเสา/ฐานราก")
@@ -729,7 +709,7 @@
       (if (or (null csvText) (= csvText ""))
         (setq csvText (strcat
           "กลุ่ม/หมวด,ชื่อชิ้นส่วน,ชนิดวัสดุ,ตัดใช้ (ม.),จำนวน (ท่อน),เส้นเต็ม,ท่อนเศษคงเหลือ,น้ำหนัก (กก.)\n"
-          "งานเสา,เสา C1,DB20,5.30,64,32,16 ท่อน,1015.66\n"
+          "งานเสา,เสา C1 ช่วงล่าง,DB20,5.30,64,32,16 ท่อน,1015.66\n"
           "งานคาน,คาน B1,DB16,4.50,2,1,1 ท่อน,14.22\n"
           "ฐานราก F1,ฐานราก F1,คอนกรีต 240 ksc,-,1,-,-,2400.00"
         ))
@@ -769,9 +749,9 @@
 ;;; คำสั่งช่วยเหลือ
 (defun c:REBAR_HELP ()
   (princ "\n=======================================================")
-  (princ "\n   คำสั่งใช้งาน Yutthakan Structural Material Sync v5.0")
+  (princ "\n   คำสั่งใช้งาน Yutthakan Structural Material Sync v5.5")
   (princ "\n=======================================================")
-  (princ "\n  REBAR_SYNC    : ถอดเหล็กเส้น 5 ขั้นตอน (กด 1 เลื่อนเลือก, กด 0 พิมพ์ใหม่, กด 00 ดึงเศษ)")
+  (princ "\n  REBAR_SYNC    : ถอดเหล็กเส้น 5 ขั้นตอน (ล็อคตามเบอร์ NO หมวดและชิ้นส่วน)")
   (princ "\n  SYNC_REBAR    : เรียกคำสั่งถอดเหล็กเส้นแบบด่วน")
   (princ "\n  SYNC_CONCRETE : คิดปริมาณปูนคอนกรีต คิว m³ พร้อมเผื่อเท Slump Loss")
   (princ "\n  SYNC_BEAM     : ถอดเหล็กบีม H-Beam / I-Beam / WF")
@@ -794,8 +774,8 @@
 
 ;;; ข้อความแสดงเมื่อโหลดปลั๊กอินสำเร็จ
 (princ "\n=======================================================")
-(princ "\n[สำเร็จ] โหลดปลั๊กอิน Yutthakan Rebar & Structural Sync v5.0 เรียบร้อย!")
-(princ "\nพิมพ์ REBAR_SYNC เพื่อเริ่มถอดเหล็กเส้น 5 ขั้นตอน")
+(princ "\n[สำเร็จ] โหลดปลั๊กอิน Yutthakan Rebar & Structural Sync v5.5 เรียบร้อย!")
+(princ "\nพิมพ์ REBAR_SYNC เพื่อเริ่มถอดเหล็กเส้น 5 ขั้นตอน (ล็อคเบอร์ NO)")
 (princ "\nพิมพ์ SYNC_MENU เพื่อดูเมนูคำสั่งแยกตามหมวดวัสดุทั้งหมด")
 (princ "\n=======================================================\n")
 (princ)
