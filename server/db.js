@@ -593,6 +593,112 @@ export function calculateRebarMetrics(data) {
   };
 }
 
+// ช่วยอ่าน/เขียนไฟล์ JSON ในเครื่อง
+function getFilePath(collection) {
+  return path.join(DATA_DIR, `${collection}.json`);
+}
+
+function readLocalJson(collection, fallback = []) {
+  const filePath = getFilePath(collection);
+  if (!fs.existsSync(filePath)) {
+    writeLocalJson(collection, fallback);
+    return fallback;
+  }
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    return JSON.parse(raw);
+  } catch (err) {
+    return fallback;
+  }
+}
+
+function writeLocalJson(collection, data) {
+  const filePath = getFilePath(collection);
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+// ฟังก์ชันเชื่อมต่อ MongoDB Atlas
+export async function connectDB() {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) return null;
+
+  if (db) return db;
+
+  try {
+    if (!client) {
+      client = new MongoClient(uri, {
+        serverSelectionTimeoutMS: 8000,
+        connectTimeoutMS: 10000,
+      });
+      await client.connect();
+      console.log('⚡ Connected to MongoDB Atlas Cloud Database');
+    }
+    db = client.db(process.env.DB_NAME || 'yutthakan_portfolio');
+    await initAtlasData(db);
+    return db;
+  } catch (err) {
+    console.warn('⚠️ MongoDB Atlas connection error, running in Local JSON fallback mode:', err.message);
+    db = null;
+    return null;
+  }
+}
+
+// ฟังก์ชันเตรียมข้อมูลเริ่มต้นใน MongoDB Atlas
+async function initAtlasData(database) {
+  try {
+    const usersCol = database.collection('users');
+    const owner = await usersCol.findOne({ username: DEFAULT_OWNER.username });
+    if (!owner) {
+      const hashedPassword = await bcrypt.hash(DEFAULT_OWNER.passwordPlain, 10);
+      await usersCol.insertOne({
+        ...DEFAULT_OWNER,
+        password: hashedPassword,
+        createdAt: new Date()
+      });
+      console.log('✅ Seeded default admin user in MongoDB Atlas');
+    }
+
+    const profileCol = database.collection('profile');
+    const profile = await profileCol.findOne({ id: 'main_profile' });
+    if (!profile) {
+      await profileCol.insertOne({
+        id: 'main_profile',
+        ...DEFAULT_OWNER,
+        createdAt: new Date()
+      });
+    }
+
+    const projectsCol = database.collection('projects');
+    const count = await projectsCol.countDocuments();
+    if (count === 0) {
+      await projectsCol.insertMany(DEFAULT_PROJECTS);
+      console.log('✅ Seeded demo projects in MongoDB Atlas');
+    }
+
+    const siteLogsCol = database.collection('site_logs');
+    const logCount = await siteLogsCol.countDocuments();
+    if (logCount === 0) {
+      await siteLogsCol.insertMany(DEFAULT_SITE_LOGS);
+    }
+
+    const rebarCol = database.collection('rebar_items');
+    const rebarCount = await rebarCol.countDocuments();
+    if (rebarCount === 0) {
+      await rebarCol.insertMany(DEFAULT_REBAR_ITEMS);
+      console.log('✅ Seeded demo rebar BBS items in MongoDB Atlas');
+    }
+
+    const offcutsCol = database.collection('rebar_offcuts');
+    const offcutsCount = await offcutsCol.countDocuments();
+    if (offcutsCount === 0) {
+      await offcutsCol.insertMany(DEFAULT_REBAR_OFFCUTS);
+      console.log('✅ Seeded demo rebar offcuts in MongoDB Atlas');
+    }
+  } catch (err) {
+    console.error('Error in initAtlasData:', err);
+  }
+}
+
 export const DataService = {
   // --- Profile & About ---
   async getProfile() {
