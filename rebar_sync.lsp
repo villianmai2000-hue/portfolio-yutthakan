@@ -183,10 +183,9 @@
   (if (= useOffcut "true")
     (setq stdlen 12.0)
     (progn
-      (setq stdIdx (getstring T "\nความยาวมาตรฐาน [1]=6.0m, [2]=10.0m, [3]=12.0m <3>: "))
+      (setq stdIdx (getstring T "\nความยาวมาตรฐานเหล็กเส้นที่ขาย [1]=10.0m, [2]=12.0m <2>: "))
       (cond
-        ((= stdIdx "1") (setq stdlen 6.0))
-        ((= stdIdx "2") (setq stdlen 10.0))
+        ((= stdIdx "1") (setq stdlen 10.0))
         (t (setq stdlen 12.0))
       )
     )
@@ -220,6 +219,73 @@
   (princ)
 )
 (defun c:REBAR_SYNC () (c:SYNC_REBAR))
+
+
+;;; =========================================================================
+;;; คำสั่ง SYNC_CONCRETE (คิดปริมาณปูนคอนกรีต คิว m³)
+;;; =========================================================================
+(defun c:SYNC_CONCRETE (/ grp member strIdx strength w l d qty waste netVol totVol payload)
+  (princ "\n=======================================================")
+  (princ "\n  ระบบบันทึกคิดปริมาณปูนคอนกรีต (m³) - ยุทธการ คำกลอน")
+  (princ "\n=======================================================")
+  (rebar-fetch-latest-metadata)
+  (setq grp (rebar-select-or-new *rebar-groups* "ขั้นที่ 1: กลุ่ม / หมวดงาน"))
+  (setq member (rebar-select-or-new *rebar-members* "ขั้นที่ 2: ชื่อส่วนโครงสร้าง"))
+
+  (princ "\n--- ขั้นที่ 3: เลือกกำลังอัดคอนกรีต (Compressive Strength) ---")
+  (princ "\n  [1]=240 ksc (มาตรฐานทั่วไป)")
+  (princ "\n  [2]=280 ksc (เสา คาน อาคาร)")
+  (princ "\n  [3]=300 ksc (ช่วงยาว ไร้คาน)")
+  (princ "\n  [4]=350 ksc (ถนน โรงงาน)")
+  (princ "\n  [5]=400 ksc (กำลังอัดสูง)")
+  (setq strIdx (getstring T "\nเลือกกำลังอัด [1-5] หรือพิมพ์เอง <1>: "))
+  (setq strIdx (vl-string-trim " \t\r\n" strIdx))
+  (cond
+    ((or (= strIdx "") (= strIdx "1")) (setq strength "240 ksc"))
+    ((= strIdx "2") (setq strength "280 ksc"))
+    ((= strIdx "3") (setq strength "300 ksc"))
+    ((= strIdx "4") (setq strength "350 ksc"))
+    ((= strIdx "5") (setq strength "400 ksc"))
+    (t (setq strength strIdx))
+  )
+
+  (setq w (getreal "\nความกว้างของชิ้นส่วน (เมตร) <0.50>: "))
+  (if (null w) (setq w 0.50))
+
+  (setq l (getreal "\nความยาวของชิ้นส่วน (เมตร) <4.00>: "))
+  (if (null l) (setq l 4.00))
+
+  (setq d (getreal "\nความลึก/หนา/สูงของชิ้นส่วน (เมตร) <0.50>: "))
+  (if (null d) (setq d 0.50))
+
+  (setq qty (getint "\nจำนวนชิ้นส่วน (จุด / ฐาน / ต้น) <1>: "))
+  (if (null qty) (setq qty 1))
+
+  (setq waste (getreal "\nเปอร์เซ็นต์เผื่อเท Slump Loss (%) <5.0>: "))
+  (if (null waste) (setq waste 5.0))
+
+  (setq netVol (* w l d qty))
+  (setq totVol (+ netVol (* netVol (/ waste 100.0))))
+
+  (princ (strcat "\n[ผลคำนวณ]: ปริมาตรสุทธิ " (rtos netVol 2 3) " คิว | เผื่อเท " (rtos waste 2 1) "% | รวมสั่ง: " (rtos totVol 2 3) " คิว"))
+
+  (setq payload (strcat
+    "{\"materialCategory\":\"concrete\""
+    ",\"label\":\"" member "\""
+    ",\"group\":\"" grp "\""
+    ",\"concreteStrength\":\"" strength "\""
+    ",\"rebarType\":\"คอนกรีต " strength "\""
+    ",\"concreteWidth\":" (rtos w 2 3)
+    ",\"concreteLength\":" (rtos l 2 3)
+    ",\"concreteDepth\":" (rtos d 2 3)
+    ",\"quantity\":" (itoa qty)
+    ",\"concreteWastePercent\":" (rtos waste 2 1) "}"
+  ))
+
+  (rebar-send-json payload (strcat "[" grp "] " member " (" strength " ปริมาตร " (rtos totVol 2 2) " คิว)"))
+  (princ)
+)
+
 
 ;;; =========================================================================
 ;;; 2. คำสั่ง SYNC_BEAM (ถอดเหล็กบีม H-Beam / I-Beam / WF)

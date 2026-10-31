@@ -16,7 +16,7 @@ import {
   REBAR_STANDARDS, H_BEAM_STANDARDS, I_BEAM_STANDARDS, WF_STANDARDS,
   BOX_STANDARDS, C_CHANNEL_STANDARDS, ROUND_PIPE_STANDARDS,
   PVC_85_STANDARDS, PVC_135_STANDARDS, PVC_FITTING_TYPES, PVC_PIPE_SIZES,
-  UNIT_WEIGHT_LOOKUP, getUnitWeight
+  UNIT_WEIGHT_LOOKUP, getUnitWeight, CONCRETE_STRENGTHS
 } from '../utils/steelStandards.js';
 
 // ตารางมาตรฐานเหล็กโครงสร้างรูปพรรณรีดร้อน H-BEAMS (มอก. 1227-2558 / TIS STANDARD)
@@ -197,7 +197,8 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
   // ฟิลเตอร์กลุ่ม/หมวด และขนาดเหล็กสำหรับตารางสรุป (ข้อกำหนด 9, 10, 11, 12)
   const [selectedRebarGroup, setSelectedRebarGroup] = useState('ทั้งหมด');
   const [selectedRebarSize, setSelectedRebarSize] = useState('ทั้งหมด');
-  const [lengthViewFilter, setLengthViewFilter] = useState('all'); // 'all', '6', '10', '12'
+  const [lengthViewFilter, setLengthViewFilter] = useState('all'); // 'all', '10', '12'
+  const [summaryTabFilter, setSummaryTabFilter] = useState('all'); // 'all', 'rebar', 'concrete', 'beam', 'plate', 'box_c_pipe', 'pvc'
   const [showPerGroupBreakdown, setShowPerGroupBreakdown] = useState(false);
 
   // ซิงก์แท็บปัจจุบันลง localStorage และ URL hash ทันทีที่เปลี่ยนแท็บ
@@ -243,7 +244,12 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
   const [rebarForm, setRebarForm] = useState({
     group: 'งานโครงสร้างทั่วไป',
     label: '',
-    materialCategory: 'rebar', // 'rebar', 'beam', 'plate', 'box_c_pipe', 'pvc'
+    materialCategory: 'rebar', // 'rebar', 'concrete', 'beam', 'plate', 'box_c_pipe', 'pvc'
+    concreteWidth: 0.50,
+    concreteLength: 4.00,
+    concreteDepth: 0.50,
+    concreteStrength: '240 ksc',
+    concreteWastePercent: 5.0,
     rebarType: 'DB20',
     standardLength: 12,
     cutLength: 6.0,
@@ -459,10 +465,186 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
     return calculateRebarSizeBreakdown(list);
   }, [rebarItems, selectedRebarGroup, selectedRebarSize, calculateRebarSizeBreakdown]);
 
+  // สรุปแยกแต่ละหมวดหมู่วัสดุอย่างเป็นสัดส่วน ไม่รวมปนกัน (ข้อกำหนด 2)
+  const categorySummaries = React.useMemo(() => {
+    // 1. งานเหล็กเส้น
+    const rebarList = rebarItems.filter(it => (it.materialCategory || 'rebar') === 'rebar');
+    const rebarSummary = calculateRebarSizeBreakdown(rebarList);
+
+    // 2. งานปูนคอนกรีต
+    const concreteList = rebarItems.filter(it => it.materialCategory === 'concrete');
+    const concreteMap = {};
+    concreteList.forEach(it => {
+      const key = it.concreteStrength || it.rebarType || '240 ksc';
+      if (!concreteMap[key]) {
+        concreteMap[key] = {
+          strength: key,
+          count: 0,
+          netVolume: 0,
+          wasteVolume: 0,
+          totalVolume: 0,
+          totalWeightKg: 0
+        };
+      }
+      concreteMap[key].count += (it.quantity || 1);
+      concreteMap[key].netVolume += (it.netVolume || 0);
+      concreteMap[key].wasteVolume += (it.wasteVolume || 0);
+      concreteMap[key].totalVolume += (it.totalVolume || 0);
+      concreteMap[key].totalWeightKg += (it.totalWeightKg || 0);
+    });
+    const concreteRows = Object.values(concreteMap);
+    const concreteGrand = concreteRows.reduce((acc, r) => ({
+      count: acc.count + r.count,
+      netVolume: Number((acc.netVolume + r.netVolume).toFixed(3)),
+      wasteVolume: Number((acc.wasteVolume + r.wasteVolume).toFixed(3)),
+      totalVolume: Number((acc.totalVolume + r.totalVolume).toFixed(3)),
+      totalWeightKg: Number((acc.totalWeightKg + r.totalWeightKg).toFixed(2))
+    }), { count: 0, netVolume: 0, wasteVolume: 0, totalVolume: 0, totalWeightKg: 0 });
+
+    // 3. งานเหล็กบีม
+    const beamList = rebarItems.filter(it => it.materialCategory === 'beam');
+    const beamMap = {};
+    beamList.forEach(it => {
+      const key = it.rebarType || it.barType || 'H-Beam';
+      if (!beamMap[key]) {
+        beamMap[key] = { size: key, bars6m: 0, bars9m: 0, bars12m: 0, totalBars: 0, totalMeters: 0, totalWeightKg: 0 };
+      }
+      const bars = it.barsNeeded || 0;
+      const std = Number(it.standardLength) || 6;
+      if (std === 6) beamMap[key].bars6m += bars;
+      else if (std === 9) beamMap[key].bars9m += bars;
+      else beamMap[key].bars12m += bars;
+      beamMap[key].totalBars += bars;
+      beamMap[key].totalMeters += (it.totalCutLength || 0);
+      beamMap[key].totalWeightKg += (it.totalWeightKg || 0);
+    });
+    const beamRows = Object.values(beamMap);
+    const beamGrand = beamRows.reduce((acc, r) => ({
+      totalBars: acc.totalBars + r.totalBars,
+      totalMeters: Number((acc.totalMeters + r.totalMeters).toFixed(2)),
+      totalWeightKg: Number((acc.totalWeightKg + r.totalWeightKg).toFixed(2))
+    }), { totalBars: 0, totalMeters: 0, totalWeightKg: 0 });
+
+    // 4. งานเหล็กเพลท & J-Bolt
+    const plateList = rebarItems.filter(it => it.materialCategory === 'plate');
+    const plateMap = {};
+    plateList.forEach(it => {
+      const key = it.rebarType || `${it.plateWidth}x${it.plateLength}x${it.plateThickness}mm`;
+      if (!plateMap[key]) {
+        plateMap[key] = {
+          size: key,
+          quantity: 0,
+          plateWeightKg: 0,
+          jboltSpec: `${it.jboltSize || 'DB16'} ยาว ${it.jboltLength || 0.4}m`,
+          totalJBolts: 0,
+          totalJBoltWeightKg: 0,
+          totalNuts: 0,
+          totalWashers: 0,
+          totalWeightKg: 0
+        };
+      }
+      plateMap[key].quantity += (it.quantity || 1);
+      plateMap[key].plateWeightKg += (it.totalPlateWeightKg || 0);
+      plateMap[key].totalJBolts += (it.totalJBolts || 0);
+      plateMap[key].totalJBoltWeightKg += (it.totalJBoltWeightKg || 0);
+      plateMap[key].totalNuts += (it.totalNuts || 0);
+      plateMap[key].totalWashers += (it.totalWashers || 0);
+      plateMap[key].totalWeightKg += (it.totalWeightKg || 0);
+    });
+    const plateRows = Object.values(plateMap);
+    const plateGrand = plateRows.reduce((acc, r) => ({
+      quantity: acc.quantity + r.quantity,
+      plateWeightKg: Number((acc.plateWeightKg + r.plateWeightKg).toFixed(2)),
+      totalJBolts: acc.totalJBolts + r.totalJBolts,
+      totalJBoltWeightKg: Number((acc.totalJBoltWeightKg + r.totalJBoltWeightKg).toFixed(2)),
+      totalNuts: acc.totalNuts + r.totalNuts,
+      totalWashers: acc.totalWashers + r.totalWashers,
+      totalWeightKg: Number((acc.totalWeightKg + r.totalWeightKg).toFixed(2))
+    }), { quantity: 0, plateWeightKg: 0, totalJBolts: 0, totalJBoltWeightKg: 0, totalNuts: 0, totalWashers: 0, totalWeightKg: 0 });
+
+    // 5. งานเหล็กรูปพรรณ (กล่อง/C/ท่อ)
+    const boxList = rebarItems.filter(it => it.materialCategory === 'box_c_pipe');
+    const boxMap = {};
+    boxList.forEach(it => {
+      const key = it.rebarType || 'เหล็กรูปพรรณ';
+      if (!boxMap[key]) {
+        boxMap[key] = { size: key, totalBars: 0, totalMeters: 0, totalWeightKg: 0 };
+      }
+      boxMap[key].totalBars += (it.barsNeeded || 0);
+      boxMap[key].totalMeters += (it.totalCutLength || 0);
+      boxMap[key].totalWeightKg += (it.totalWeightKg || 0);
+    });
+    const boxRows = Object.values(boxMap);
+    const boxGrand = boxRows.reduce((acc, r) => ({
+      totalBars: acc.totalBars + r.totalBars,
+      totalMeters: Number((acc.totalMeters + r.totalMeters).toFixed(2)),
+      totalWeightKg: Number((acc.totalWeightKg + r.totalWeightKg).toFixed(2))
+    }), { totalBars: 0, totalMeters: 0, totalWeightKg: 0 });
+
+    // 6. งานท่อ PVC & ข้อต่อ
+    const pvcList = rebarItems.filter(it => it.materialCategory === 'pvc');
+    const pvcMap = {};
+    pvcList.forEach(it => {
+      const key = it.rebarType || 'ท่อ PVC';
+      const isFit = it.pvcType === 'fitting' || it.pvcType === 'valve';
+      if (!pvcMap[key]) {
+        pvcMap[key] = { name: key, isFitting: isFit, bars4m: 0, pieces: 0, totalMeters: 0, totalWeightKg: 0 };
+      }
+      if (isFit) {
+        pvcMap[key].pieces += (it.quantity || 1);
+      } else {
+        pvcMap[key].bars4m += (it.barsNeeded || 0);
+        pvcMap[key].totalMeters += (it.totalCutLength || 0);
+        pvcMap[key].totalWeightKg += (it.totalWeightKg || 0);
+      }
+    });
+    const pvcRows = Object.values(pvcMap);
+
+    return {
+      rebar: rebarSummary,
+      concrete: { rows: concreteRows, grand: concreteGrand },
+      beam: { rows: beamRows, grand: beamGrand },
+      plate: { rows: plateRows, grand: plateGrand },
+      box: { rows: boxRows, grand: boxGrand },
+      pvc: { rows: pvcRows }
+    };
+  }, [rebarItems, calculateRebarSizeBreakdown]);
+
   // ========================================================
   const calculateRebarMetrics = (stdLen, cutLen, qty, type, isReused, offcutInitialLen, formExtra = {}) => {
     const category = formExtra.materialCategory || 'rebar';
     const count = Number(qty) || 1;
+
+    // 0. หมวดงานปูนคอนกรีต (Concrete Takeoff)
+    if (category === 'concrete') {
+      const cW = Number(formExtra.concreteWidth) || 0.50;
+      const cL = Number(formExtra.concreteLength) || 4.00;
+      const cD = Number(formExtra.concreteDepth || formExtra.concreteHeight) || 0.50;
+      const wastePct = Number(formExtra.concreteWastePercent !== undefined ? formExtra.concreteWastePercent : 5.0);
+      const netVol = Number((cW * cL * cD * count).toFixed(3));
+      const wasteVol = Number((netVol * (wastePct / 100)).toFixed(3));
+      const totalVol = Number((netVol + wasteVol).toFixed(3));
+      const totalWeight = Number((totalVol * 2400).toFixed(2));
+
+      return {
+        isConcrete: true,
+        piecesPerBar: 0,
+        standardBarsNeeded: 0,
+        offcutPerBar: 0,
+        offcutQuantity: 0,
+        totalCutLength: 0,
+        totalStandardLength: 0,
+        totalScrapLength: 0,
+        scrapPercent: wastePct,
+        wastePercent: wastePct,
+        netVolume: netVol,
+        wasteVolume: wasteVol,
+        totalVolume: totalVol,
+        unitWeight: 2400,
+        totalWeightKg: totalWeight,
+        totalBarWeightKg: totalWeight
+      };
+    }
 
     // 1. หมวดงานเหล็กเพลท
     if (category === 'plate') {
@@ -560,10 +742,13 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
     const totalWeightKg = totalCutLength * unitWeight;
     const totalBarWeightKg = totalStandardLength * unitWeight;
 
+    const offcutQuantity = Number(formExtra.offcutQuantity) || (piecesPerBar > 1 ? Math.floor(standardBarsNeeded / piecesPerBar) : standardBarsNeeded) || 1;
+
     return {
       piecesPerBar,
       standardBarsNeeded,
       offcutPerBar: Number(offcutPerBar.toFixed(2)),
+      offcutQuantity,
       totalCutLength: Number(totalCutLength.toFixed(2)),
       totalStandardLength: Number(totalStandardLength.toFixed(2)),
       totalScrapLength: Number(totalScrapLength.toFixed(2)),
@@ -577,9 +762,10 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
   const handleSaveRebar = async (e) => {
     e.preventDefault();
     const isPlate = rebarForm.materialCategory === 'plate';
+    const isConcrete = rebarForm.materialCategory === 'concrete';
     const isFitting = rebarForm.materialCategory === 'pvc' && (rebarForm.pvcType === 'fitting' || rebarForm.pvcType === 'valve');
 
-    if (!isPlate && !isFitting && (!rebarForm.cutLength || rebarForm.cutLength <= 0)) {
+    if (!isPlate && !isConcrete && !isFitting && (!rebarForm.cutLength || rebarForm.cutLength <= 0)) {
       showFeedback('error', 'กรุณาระบุความยาวที่ตัดใช้ให้ถูกต้อง');
       return;
     }
@@ -1309,240 +1495,420 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                   </div>
 
                   {/* ========================================================
-                      ตารางสรุปการสั่งเหล็กมาตรฐาน (ข้อกำหนด 10, 11)
-                      แยกออกเป็น 6m, 10m, 12m พร้อมตัวเลือกดูในตารางเดียวกัน
+                      งานสรุปแยกแต่ละหมวดหมู่วัสดุ ไม่รวมกัน (ข้อกำหนด 2)
                      ======================================================== */}
-                  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                    <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-gradient-to-r from-emerald-500/5 to-teal-500/5">
-                      <div>
-                        <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-1.5">
-                          <span>📋 ตารางสรุปการสั่งเหล็กมาตรฐาน:</span>
-                          <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">
-                            {selectedRebarGroup === 'ทั้งหมด' ? 'หมวดทั้งหมดที่เลือก' : `หมวด ${selectedRebarGroup}`}
-                          </span>
-                        </h4>
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          แสดงจำนวนเส้นมาตรฐานที่ต้องสั่ง แยกตามสเปก 6m, 10m, 12m (เรียงจากเล็กไปหามาก)
-                        </p>
+                  <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-xs font-bold px-2 text-slate-700 dark:text-slate-300">
+                      📑 แยกหมวดสรุปวัสดุ:
+                    </span>
+                    {[
+                      { id: 'all', label: 'ดูทุกหมวดแยกตาราง' },
+                      { id: 'rebar', icon: '🔩', label: 'เหล็กเส้น' },
+                      { id: 'concrete', icon: '🧱', label: 'ปูนคอนกรีต' },
+                      { id: 'beam', icon: '🏗️', label: 'เหล็กบีม' },
+                      { id: 'plate', icon: '⬛', label: 'เหล็กเพลท & J-Bolt' },
+                      { id: 'box_c_pipe', icon: '📦', label: 'กล่อง/C/ท่อ' },
+                      { id: 'pvc', icon: '💧', label: 'ท่อ PVC & ข้อต่อ' }
+                    ].map(tab => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setSummaryTabFilter(tab.id)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                          summaryTabFilter === tab.id
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900'
+                        }`}
+                      >
+                        <span>{tab.icon}</span>
+                        <span>{tab.label}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* 1. สรุปหมวดงานเหล็กเส้น (มอก.) */}
+                  {(summaryTabFilter === 'all' || summaryTabFilter === 'rebar') && (
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                      <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-gradient-to-r from-emerald-500/10 to-teal-500/10">
+                        <div>
+                          <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <span>🔩 ตารางสรุปงานเหล็กเส้นมาตรฐาน (มอก. 24-2559 / 20-2559):</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">
+                              {selectedRebarGroup === 'ทั้งหมด' ? 'ทุกหมวด' : `หมวด ${selectedRebarGroup}`}
+                            </span>
+                          </h4>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            แสดงจำนวนเส้นมาตรฐานที่ต้องสั่ง แยกตามสเปก 10m และ 12m (เรียงจากเล็กไปหามาก)
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs">
+                          <span className="text-[11px] px-2 font-bold text-slate-500">ดูสเปก:</span>
+                          <button
+                            type="button"
+                            onClick={() => setLengthViewFilter('all')}
+                            className={`px-2.5 py-1 rounded-lg font-bold ${lengthViewFilter === 'all' ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow-sm' : 'text-slate-600 dark:text-slate-400'}`}
+                          >
+                            ทั้งหมด (10m, 12m)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setLengthViewFilter('10')}
+                            className={`px-2.5 py-1 rounded-lg font-bold ${lengthViewFilter === '10' ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow-sm' : 'text-slate-600 dark:text-slate-400'}`}
+                          >
+                            เฉพาะ 10m
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setLengthViewFilter('12')}
+                            className={`px-2.5 py-1 rounded-lg font-bold ${lengthViewFilter === '12' ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow-sm' : 'text-slate-600 dark:text-slate-400'}`}
+                          >
+                            เฉพาะ 12m
+                          </button>
+                        </div>
                       </div>
 
-                      {/* สวิตช์เลือกดูสเปกความยาว (ข้อกำหนด 10) */}
-                      <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs">
-                        <span className="text-[11px] px-2 font-bold text-slate-500">ดูสเปก:</span>
-                        <button
-                          type="button"
-                          onClick={() => setLengthViewFilter('all')}
-                          className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-                            lengthViewFilter === 'all'
-                              ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow-sm'
-                              : 'text-slate-600 dark:text-slate-400'
-                          }`}
-                        >
-                          ทั้งหมด (6m, 10m, 12m)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setLengthViewFilter('6')}
-                          className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-                            lengthViewFilter === '6'
-                              ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow-sm'
-                              : 'text-slate-600 dark:text-slate-400'
-                          }`}
-                        >
-                          เฉพาะ 6m
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setLengthViewFilter('10')}
-                          className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-                            lengthViewFilter === '10'
-                              ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow-sm'
-                              : 'text-slate-600 dark:text-slate-400'
-                          }`}
-                        >
-                          เฉพาะ 10m
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setLengthViewFilter('12')}
-                          className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-                            lengthViewFilter === '12'
-                              ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow-sm'
-                              : 'text-slate-600 dark:text-slate-400'
-                          }`}
-                        >
-                          เฉพาะ 12m
-                        </button>
-                      </div>
-                    </div>
-
-                    {filteredCategorySummary.rows.length === 0 ? (
-                      <div className="p-8 text-center text-slate-400 text-xs">
-                        ไม่มีข้อมูลเหล็กในหมวดหมู่นี้
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs text-left">
-                          <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 uppercase tracking-wider font-bold border-b border-slate-200 dark:border-slate-800">
-                            <tr>
-                              <th className="p-3">ขนาดเหล็ก (มอก.)</th>
-                              {(lengthViewFilter === 'all' || lengthViewFilter === '6') && (
-                                <th className="p-3 text-right text-emerald-700 dark:text-emerald-400">เส้น (6 ม.)</th>
-                              )}
-                              {(lengthViewFilter === 'all' || lengthViewFilter === '10') && (
-                                <th className="p-3 text-right text-blue-700 dark:text-blue-400">เส้น (10 ม.)</th>
-                              )}
-                              {(lengthViewFilter === 'all' || lengthViewFilter === '12') && (
-                                <th className="p-3 text-right text-indigo-700 dark:text-indigo-400">เส้น (12 ม.)</th>
-                              )}
-                              <th className="p-3 text-right font-black text-slate-900 dark:text-white">รวมจำนวนเส้น</th>
-                              <th className="p-3 text-right">ความยาวรวม (ม.)</th>
-                              <th className="p-3 text-right">น้ำหนักรวม (กก.)</th>
-                              <th className="p-3 text-right text-indigo-600 dark:text-indigo-400">น้ำหนักรวม (ตัน)</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                            {filteredCategorySummary.rows.map(row => (
-                              <tr key={row.type} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                                <td className="p-3 font-bold text-slate-900 dark:text-white">
-                                  <span className="px-2.5 py-1 rounded-md bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300 font-extrabold border border-amber-200 dark:border-amber-800/60">
-                                    {row.type}
-                                  </span>
-                                </td>
-                                {(lengthViewFilter === 'all' || lengthViewFilter === '6') && (
-                                  <td className="p-3 text-right font-semibold text-emerald-600 dark:text-emerald-400">
-                                    {row.bars6m > 0 ? `${row.bars6m} เส้น` : '-'}
-                                  </td>
-                                )}
+                      {categorySummaries.rebar.rows.length === 0 ? (
+                        <div className="p-6 text-center text-slate-400 text-xs">ไม่มีรายการเหล็กเส้นในระบบ</div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs text-left">
+                            <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 uppercase tracking-wider font-bold border-b border-slate-200 dark:border-slate-800">
+                              <tr>
+                                <th className="p-3">ขนาดเหล็ก (มอก.)</th>
                                 {(lengthViewFilter === 'all' || lengthViewFilter === '10') && (
-                                  <td className="p-3 text-right font-semibold text-blue-600 dark:text-blue-400">
-                                    {row.bars10m > 0 ? `${row.bars10m} เส้น` : '-'}
+                                  <th className="p-3 text-right text-blue-700 dark:text-blue-400">เส้น (10 ม.)</th>
+                                )}
+                                {(lengthViewFilter === 'all' || lengthViewFilter === '12') && (
+                                  <th className="p-3 text-right text-indigo-700 dark:text-indigo-400">เส้น (12 ม.)</th>
+                                )}
+                                <th className="p-3 text-right font-black text-slate-900 dark:text-white">รวมจำนวนเส้น</th>
+                                <th className="p-3 text-right">ความยาวตัดจริง (ม.)</th>
+                                <th className="p-3 text-right">น้ำหนักรวม (กก.)</th>
+                                <th className="p-3 text-right text-indigo-600 dark:text-indigo-400">น้ำหนักรวม (ตัน)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
+                              {categorySummaries.rebar.rows.map(row => (
+                                <tr key={row.type} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                                  <td className="p-3 font-bold text-slate-900 dark:text-white">
+                                    <span className="px-2.5 py-1 rounded-md bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300 font-extrabold border border-amber-200 dark:border-amber-800/60">
+                                      {row.type}
+                                    </span>
+                                  </td>
+                                  {(lengthViewFilter === 'all' || lengthViewFilter === '10') && (
+                                    <td className="p-3 text-right font-semibold text-blue-600 dark:text-blue-400">
+                                      {row.bars10m > 0 ? `${row.bars10m} เส้น` : '-'}
+                                    </td>
+                                  )}
+                                  {(lengthViewFilter === 'all' || lengthViewFilter === '12') && (
+                                    <td className="p-3 text-right font-semibold text-indigo-600 dark:text-indigo-400">
+                                      {row.bars12m > 0 ? `${row.bars12m} เส้น` : '-'}
+                                    </td>
+                                  )}
+                                  <td className="p-3 text-right font-black text-slate-900 dark:text-white text-sm">
+                                    {row.totalBars} เส้น
+                                  </td>
+                                  <td className="p-3 text-right text-slate-700 dark:text-slate-300">
+                                    {row.totalCutMeters.toFixed(2)} ม.
+                                  </td>
+                                  <td className="p-3 text-right font-semibold text-slate-900 dark:text-white">
+                                    {row.totalCutWeightKg.toFixed(2)} กก.
+                                  </td>
+                                  <td className="p-3 text-right font-bold text-indigo-600 dark:text-indigo-400">
+                                    {(row.totalCutWeightKg / 1000).toFixed(3)} ตัน
+                                  </td>
+                                </tr>
+                              ))}
+                              <tr className="bg-slate-100/80 dark:bg-slate-800/70 font-black text-slate-900 dark:text-white border-t-2 border-slate-300 dark:border-slate-700">
+                                <td className="p-3">รวมเหล็กเส้นทั้งหมด</td>
+                                {(lengthViewFilter === 'all' || lengthViewFilter === '10') && (
+                                  <td className="p-3 text-right text-blue-600 dark:text-blue-400">
+                                    {categorySummaries.rebar.grand.bars10m} เส้น
                                   </td>
                                 )}
                                 {(lengthViewFilter === 'all' || lengthViewFilter === '12') && (
-                                  <td className="p-3 text-right font-semibold text-indigo-600 dark:text-indigo-400">
-                                    {row.bars12m > 0 ? `${row.bars12m} เส้น` : '-'}
+                                  <td className="p-3 text-right text-indigo-600 dark:text-indigo-400">
+                                    {categorySummaries.rebar.grand.bars12m} เส้น
                                   </td>
                                 )}
-                                <td className="p-3 text-right font-black text-slate-900 dark:text-white text-sm">
-                                  {row.totalBars} เส้น
+                                <td className="p-3 text-right text-sm">
+                                  {categorySummaries.rebar.grand.totalBars} เส้น
                                 </td>
-                                <td className="p-3 text-right text-slate-700 dark:text-slate-300">
-                                  {row.totalCutMeters.toFixed(2)} ม.
+                                <td className="p-3 text-right">
+                                  {categorySummaries.rebar.grand.totalCutMeters.toFixed(2)} ม.
                                 </td>
-                                <td className="p-3 text-right font-semibold text-slate-900 dark:text-white">
-                                  {row.totalCutWeightKg.toFixed(2)} กก.
+                                <td className="p-3 text-right">
+                                  {categorySummaries.rebar.grand.totalCutWeightKg.toFixed(2)} กก.
                                 </td>
-                                <td className="p-3 text-right font-bold text-indigo-600 dark:text-indigo-400">
-                                  {(row.totalCutWeightKg / 1000).toFixed(3)} ตัน
+                                <td className="p-3 text-right text-indigo-600 dark:text-indigo-400">
+                                  {(categorySummaries.rebar.grand.totalCutWeightKg / 1000).toFixed(3)} ตัน
                                 </td>
                               </tr>
-                            ))}
-                            {/* Subtotal row */}
-                            <tr className="bg-slate-100/80 dark:bg-slate-800/70 font-black text-slate-900 dark:text-white border-t-2 border-slate-300 dark:border-slate-700">
-                              <td className="p-3">
-                                รวมตามหมวด ({selectedRebarGroup})
-                              </td>
-                              {(lengthViewFilter === 'all' || lengthViewFilter === '6') && (
-                                <td className="p-3 text-right text-emerald-600 dark:text-emerald-400">
-                                  {filteredCategorySummary.grand.bars6m} เส้น
-                                </td>
-                              )}
-                              {(lengthViewFilter === 'all' || lengthViewFilter === '10') && (
-                                <td className="p-3 text-right text-blue-600 dark:text-blue-400">
-                                  {filteredCategorySummary.grand.bars10m} เส้น
-                                </td>
-                              )}
-                              {(lengthViewFilter === 'all' || lengthViewFilter === '12') && (
-                                <td className="p-3 text-right text-indigo-600 dark:text-indigo-400">
-                                  {filteredCategorySummary.grand.bars12m} เส้น
-                                </td>
-                              )}
-                              <td className="p-3 text-right text-sm">
-                                {filteredCategorySummary.grand.totalBars} เส้น
-                              </td>
-                              <td className="p-3 text-right">
-                                {filteredCategorySummary.grand.totalCutMeters.toFixed(2)} ม.
-                              </td>
-                              <td className="p-3 text-right">
-                                {filteredCategorySummary.grand.totalCutWeightKg.toFixed(2)} กก.
-                              </td>
-                              <td className="p-3 text-right text-indigo-600 dark:text-indigo-400">
-                                {(filteredCategorySummary.grand.totalCutWeightKg / 1000).toFixed(3)} ตัน
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* ========================================================
-                      ตารางสรุปยอดรวมทั้งโครงการ (Grand Total - ข้อกำหนด 12)
-                      แยกออกจากตารางหมวดหมู่อย่างชัดเจน ไม่รวมกัน
-                     ======================================================== */}
-                  <div className="bg-gradient-to-br from-slate-900 to-slate-950 text-white rounded-2xl p-5 border border-slate-800 shadow-xl space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                          <h4 className="font-extrabold text-sm tracking-wide uppercase text-white">
-                            🌟 ตารางสรุปยอดรวมทั้งโครงการ (Grand Total - ทุกหมวดหมู่)
-                          </h4>
+                            </tbody>
+                          </table>
                         </div>
-                        <p className="text-xs text-slate-400 mt-1">
-                          สรุปยอดสั่งซื้อเหล็กเส้นและเหล็กบีมทั้งหมดของทุกฐาน เสา คาน และพื้นในระบบ (ข้อกำหนด 12)
+                      )}
+                    </div>
+                  )}
+
+                  {/* 2. สรุปหมวดงานปูนคอนกรีต */}
+                  {(summaryTabFilter === 'all' || summaryTabFilter === 'concrete') && (
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                      <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-amber-500/10 to-orange-500/10">
+                        <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <span>🧱 ตารางสรุปงานปูนคอนกรีต (ปริมาตรคิว m³):</span>
+                        </h4>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          สรุปยอดสั่งปูนคอนกรีตผสมเสร็จ แยกตามระดับกำลังอัด (Strength ksc)
                         </p>
                       </div>
+                      {categorySummaries.concrete.rows.length === 0 ? (
+                        <div className="p-6 text-center text-slate-400 text-xs">ไม่มีรายการปูนคอนกรีตในระบบ</div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs text-left">
+                            <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-800">
+                              <tr>
+                                <th className="p-3">กำลังอัดคอนกรีต (Strength)</th>
+                                <th className="p-3 text-right">จำนวนชิ้นส่วน</th>
+                                <th className="p-3 text-right">ปริมาตรสุทธิ (คิว)</th>
+                                <th className="p-3 text-right">เผื่อเทรวม (คิว)</th>
+                                <th className="p-3 text-right font-black text-amber-600 dark:text-amber-400">ปริมาตรรวมสั่ง (คิว)</th>
+                                <th className="p-3 text-right">น้ำหนักประมาณการ (ตัน)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
+                              {categorySummaries.concrete.rows.map((row, idx) => (
+                                <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                                  <td className="p-3 font-bold text-slate-900 dark:text-white">
+                                    <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold">
+                                      {row.strength}
+                                    </span>
+                                  </td>
+                                  <td className="p-3 text-right">{row.count} จุด/ชิ้น</td>
+                                  <td className="p-3 text-right">{row.netVolume.toFixed(2)} คิว</td>
+                                  <td className="p-3 text-right text-slate-500">+{row.wasteVolume.toFixed(2)} คิว</td>
+                                  <td className="p-3 text-right font-black text-amber-600 dark:text-amber-400 text-sm">
+                                    {row.totalVolume.toFixed(2)} คิว
+                                  </td>
+                                  <td className="p-3 text-right font-bold text-slate-700 dark:text-slate-300">
+                                    {(row.totalWeightKg / 1000).toFixed(3)} ตัน
+                                  </td>
+                                </tr>
+                              ))}
+                              <tr className="bg-amber-50/80 dark:bg-amber-950/40 font-black text-slate-900 dark:text-white border-t-2 border-amber-300 dark:border-amber-700">
+                                <td className="p-3">รวมปูนคอนกรีตทั้งหมด</td>
+                                <td className="p-3 text-right">{categorySummaries.concrete.grand.count} จุด/ชิ้น</td>
+                                <td className="p-3 text-right">{categorySummaries.concrete.grand.netVolume.toFixed(2)} คิว</td>
+                                <td className="p-3 text-right">+{categorySummaries.concrete.grand.wasteVolume.toFixed(2)} คิว</td>
+                                <td className="p-3 text-right text-amber-700 dark:text-amber-300 text-sm">
+                                  {categorySummaries.concrete.grand.totalVolume.toFixed(2)} คิว
+                                </td>
+                                <td className="p-3 text-right">
+                                  {(categorySummaries.concrete.grand.totalWeightKg / 1000).toFixed(3)} ตัน
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
-                      <div className="flex items-center gap-3 text-xs bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700">
-                        <span>เหล็กทั้งหมด: <b className="text-emerald-400">{allProjectRebarSummary.grand.totalBars} เส้น</b></span>
-                        <span className="text-slate-600">|</span>
-                        <span>น้ำหนักรวม: <b className="text-indigo-300">{(allProjectRebarSummary.grand.totalCutWeightKg / 1000).toFixed(3)} ตัน</b></span>
+                  {/* 3. สรุปหมวดงานเหล็กบีม */}
+                  {(summaryTabFilter === 'all' || summaryTabFilter === 'beam') && (
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                      <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-blue-500/10 to-indigo-500/10">
+                        <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <span>🏗️ ตารางสรุปงานเหล็กบีม (H-Beam / I-Beam / WF):</span>
+                        </h4>
                       </div>
+                      {categorySummaries.beam.rows.length === 0 ? (
+                        <div className="p-6 text-center text-slate-400 text-xs">ไม่มีรายการเหล็กบีมในระบบ</div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs text-left">
+                            <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-800">
+                              <tr>
+                                <th className="p-3">ขนาดเหล็กบีม</th>
+                                <th className="p-3 text-right">ท่อน (6 ม.)</th>
+                                <th className="p-3 text-right">ท่อน (9 ม.)</th>
+                                <th className="p-3 text-right">ท่อน (12 ม.)</th>
+                                <th className="p-3 text-right font-black text-blue-600">รวมจำนวนท่อน</th>
+                                <th className="p-3 text-right">ความยาวรวม (ม.)</th>
+                                <th className="p-3 text-right">น้ำหนักรวม (กก.)</th>
+                                <th className="p-3 text-right font-bold text-blue-600">น้ำหนักรวม (ตัน)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
+                              {categorySummaries.beam.rows.map((row, idx) => (
+                                <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                                  <td className="p-3 font-bold text-slate-900 dark:text-white">{row.size}</td>
+                                  <td className="p-3 text-right">{row.bars6m > 0 ? `${row.bars6m} ท่อน` : '-'}</td>
+                                  <td className="p-3 text-right">{row.bars9m > 0 ? `${row.bars9m} ท่อน` : '-'}</td>
+                                  <td className="p-3 text-right">{row.bars12m > 0 ? `${row.bars12m} ท่อน` : '-'}</td>
+                                  <td className="p-3 text-right font-black text-blue-600">{row.totalBars} ท่อน</td>
+                                  <td className="p-3 text-right">{row.totalMeters.toFixed(2)} ม.</td>
+                                  <td className="p-3 text-right">{row.totalWeightKg.toFixed(2)} กก.</td>
+                                  <td className="p-3 text-right font-bold text-blue-600">{(row.totalWeightKg / 1000).toFixed(3)} ตัน</td>
+                                </tr>
+                              ))}
+                              <tr className="bg-blue-50/80 dark:bg-blue-950/40 font-black text-slate-900 dark:text-white border-t-2 border-blue-300 dark:border-blue-700">
+                                <td className="p-3">รวมเหล็กบีมทั้งหมด</td>
+                                <td className="p-3 text-right">-</td>
+                                <td className="p-3 text-right">-</td>
+                                <td className="p-3 text-right">-</td>
+                                <td className="p-3 text-right text-blue-700 dark:text-blue-300">{categorySummaries.beam.grand.totalBars} ท่อน</td>
+                                <td className="p-3 text-right">{categorySummaries.beam.grand.totalMeters.toFixed(2)} ม.</td>
+                                <td className="p-3 text-right">{categorySummaries.beam.grand.totalWeightKg.toFixed(2)} กก.</td>
+                                <td className="p-3 text-right">{(categorySummaries.beam.grand.totalWeightKg / 1000).toFixed(3)} ตัน</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
+                  )}
 
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs text-left">
-                        <thead className="bg-slate-800/50 text-slate-300 uppercase tracking-wider font-semibold border-b border-slate-800">
-                          <tr>
-                            <th className="p-2.5">ขนาดเหล็ก (มอก.)</th>
-                            <th className="p-2.5 text-right text-emerald-400">เส้น 6.0 ม.</th>
-                            <th className="p-2.5 text-right text-blue-400">เส้น 10.0 ม.</th>
-                            <th className="p-2.5 text-right text-indigo-400">เส้น 12.0 ม.</th>
-                            <th className="p-2.5 text-right font-bold text-white">รวมจำนวนเส้น</th>
-                            <th className="p-2.5 text-right">ความยาวตัดจริง (ม.)</th>
-                            <th className="p-2.5 text-right">น้ำหนักรวม (กก.)</th>
-                            <th className="p-2.5 text-right text-amber-300">น้ำหนักรวม (ตัน)</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800 text-slate-300">
-                          {allProjectRebarSummary.rows.map(r => (
-                            <tr key={r.type} className="hover:bg-slate-800/30">
-                              <td className="p-2.5 font-bold text-amber-300">{r.type}</td>
-                              <td className="p-2.5 text-right text-emerald-400">{r.bars6m > 0 ? `${r.bars6m} เส้น` : '-'}</td>
-                              <td className="p-2.5 text-right text-blue-400">{r.bars10m > 0 ? `${r.bars10m} เส้น` : '-'}</td>
-                              <td className="p-2.5 text-right text-indigo-400">{r.bars12m > 0 ? `${r.bars12m} เส้น` : '-'}</td>
-                              <td className="p-2.5 text-right font-black text-white">{r.totalBars} เส้น</td>
-                              <td className="p-2.5 text-right">{r.totalCutMeters.toFixed(2)} ม.</td>
-                              <td className="p-2.5 text-right">{r.totalCutWeightKg.toFixed(2)} กก.</td>
-                              <td className="p-2.5 text-right font-bold text-amber-300">{(r.totalCutWeightKg / 1000).toFixed(3)} ตัน</td>
-                            </tr>
-                          ))}
-                          <tr className="bg-slate-800/80 font-black text-white border-t border-slate-700">
-                            <td className="p-2.5 text-emerald-400">รวมทั้งหมดทั้งโครงการ</td>
-                            <td className="p-2.5 text-right text-emerald-400">{allProjectRebarSummary.grand.bars6m} เส้น</td>
-                            <td className="p-2.5 text-right text-blue-400">{allProjectRebarSummary.grand.bars10m} เส้น</td>
-                            <td className="p-2.5 text-right text-indigo-400">{allProjectRebarSummary.grand.bars12m} เส้น</td>
-                            <td className="p-2.5 text-right text-emerald-400 text-sm">{allProjectRebarSummary.grand.totalBars} เส้น</td>
-                            <td className="p-2.5 text-right">{allProjectRebarSummary.grand.totalCutMeters.toFixed(2)} ม.</td>
-                            <td className="p-2.5 text-right">{allProjectRebarSummary.grand.totalCutWeightKg.toFixed(2)} กก.</td>
-                            <td className="p-2.5 text-right text-amber-400 text-sm">{(allProjectRebarSummary.grand.totalCutWeightKg / 1000).toFixed(3)} ตัน</td>
-                          </tr>
-                        </tbody>
-                      </table>
+                  {/* 4. สรุปหมวดงานเหล็กเพลท & J-Bolt */}
+                  {(summaryTabFilter === 'all' || summaryTabFilter === 'plate') && (
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                      <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-purple-500/10 to-indigo-500/10">
+                        <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <span>⬛ ตารางสรุปงานเหล็กเพลท & J-Bolt:</span>
+                        </h4>
+                      </div>
+                      {categorySummaries.plate.rows.length === 0 ? (
+                        <div className="p-6 text-center text-slate-400 text-xs">ไม่มีรายการเหล็กเพลทในระบบ</div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs text-left">
+                            <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-800">
+                              <tr>
+                                <th className="p-3">ขนาดเพลท</th>
+                                <th className="p-3 text-right">จำนวนแผ่น</th>
+                                <th className="p-3 text-right">น้ำหนักเพลท (กก.)</th>
+                                <th className="p-3">สเปก J-Bolt</th>
+                                <th className="p-3 text-right">J-Bolt (ชุด)</th>
+                                <th className="p-3 text-right">น้ำหนัก J-Bolt (กก.)</th>
+                                <th className="p-3 text-right">น็อต/แหวน (ตัว)</th>
+                                <th className="p-3 text-right font-black text-purple-600">น้ำหนักรวมทั้งสิ้น (กก.)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
+                              {categorySummaries.plate.rows.map((row, idx) => (
+                                <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                                  <td className="p-3 font-bold text-slate-900 dark:text-white">{row.size}</td>
+                                  <td className="p-3 text-right font-bold">{row.quantity} แผ่น</td>
+                                  <td className="p-3 text-right">{row.plateWeightKg.toFixed(2)} กก.</td>
+                                  <td className="p-3">{row.jboltSpec}</td>
+                                  <td className="p-3 text-right">{row.totalJBolts} ชุด</td>
+                                  <td className="p-3 text-right">{row.totalJBoltWeightKg.toFixed(2)} กก.</td>
+                                  <td className="p-3 text-right">{row.totalNuts} / {row.totalWashers}</td>
+                                  <td className="p-3 text-right font-black text-purple-600">{row.totalWeightKg.toFixed(2)} กก.</td>
+                                </tr>
+                              ))}
+                              <tr className="bg-purple-50/80 dark:bg-purple-950/40 font-black text-slate-900 dark:text-white border-t-2 border-purple-300 dark:border-purple-700">
+                                <td className="p-3">รวมเพลท & J-Bolt ทั้งหมด</td>
+                                <td className="p-3 text-right">{categorySummaries.plate.grand.quantity} แผ่น</td>
+                                <td className="p-3 text-right">{categorySummaries.plate.grand.plateWeightKg.toFixed(2)} กก.</td>
+                                <td className="p-3">-</td>
+                                <td className="p-3 text-right">{categorySummaries.plate.grand.totalJBolts} ชุด</td>
+                                <td className="p-3 text-right">{categorySummaries.plate.grand.totalJBoltWeightKg.toFixed(2)} กก.</td>
+                                <td className="p-3 text-right">{categorySummaries.plate.grand.totalNuts} / {categorySummaries.plate.grand.totalWashers}</td>
+                                <td className="p-3 text-right text-purple-700 dark:text-purple-300">{categorySummaries.plate.grand.totalWeightKg.toFixed(2)} กก.</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
-                  </div>
+                  )}
+
+                  {/* 5. สรุปหมวดงานเหล็กรูปพรรณ (กล่อง/C/ท่อ) */}
+                  {(summaryTabFilter === 'all' || summaryTabFilter === 'box_c_pipe') && (
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                      <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-orange-500/10 to-amber-500/10">
+                        <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <span>📦 ตารางสรุปงานเหล็กรูปพรรณ (เหล็กกล่อง, ตัวซี C, ท่อกลม):</span>
+                        </h4>
+                      </div>
+                      {categorySummaries.box.rows.length === 0 ? (
+                        <div className="p-6 text-center text-slate-400 text-xs">ไม่มีรายการเหล็กรูปพรรณในระบบ</div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs text-left">
+                            <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-800">
+                              <tr>
+                                <th className="p-3">ชนิด / ขนาดเหล็ก</th>
+                                <th className="p-3 text-right">จำนวนท่อน (6 ม.)</th>
+                                <th className="p-3 text-right">ความยาวรวม (ม.)</th>
+                                <th className="p-3 text-right">น้ำหนักรวม (กก.)</th>
+                                <th className="p-3 text-right font-black text-orange-600">น้ำหนักรวม (ตัน)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
+                              {categorySummaries.box.rows.map((row, idx) => (
+                                <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                                  <td className="p-3 font-bold text-slate-900 dark:text-white">{row.size}</td>
+                                  <td className="p-3 text-right font-black text-orange-600">{row.totalBars} ท่อน</td>
+                                  <td className="p-3 text-right">{row.totalMeters.toFixed(2)} ม.</td>
+                                  <td className="p-3 text-right">{row.totalWeightKg.toFixed(2)} กก.</td>
+                                  <td className="p-3 text-right font-bold text-orange-600">{(row.totalWeightKg / 1000).toFixed(3)} ตัน</td>
+                                </tr>
+                              ))}
+                              <tr className="bg-orange-50/80 dark:bg-orange-950/40 font-black text-slate-900 dark:text-white border-t-2 border-orange-300 dark:border-orange-700">
+                                <td className="p-3">รวมเหล็กรูปพรรณทั้งหมด</td>
+                                <td className="p-3 text-right text-orange-700 dark:text-orange-300">{categorySummaries.box.grand.totalBars} ท่อน</td>
+                                <td className="p-3 text-right">{categorySummaries.box.grand.totalMeters.toFixed(2)} ม.</td>
+                                <td className="p-3 text-right">{categorySummaries.box.grand.totalWeightKg.toFixed(2)} กก.</td>
+                                <td className="p-3 text-right">{(categorySummaries.box.grand.totalWeightKg / 1000).toFixed(3)} ตัน</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 6. สรุปหมวดงานท่อ PVC & ข้อต่อ */}
+                  {(summaryTabFilter === 'all' || summaryTabFilter === 'pvc') && (
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+                      <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-cyan-500/10 to-blue-500/10">
+                        <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <span>💧 ตารางสรุปงานท่อ PVC และอุปกรณ์ข้อต่อ/วาล์ว:</span>
+                        </h4>
+                      </div>
+                      {categorySummaries.pvc.rows.length === 0 ? (
+                        <div className="p-6 text-center text-slate-400 text-xs">ไม่มีรายการท่อ PVC ในระบบ</div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs text-left">
+                            <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-800">
+                              <tr>
+                                <th className="p-3">ชนิด / ขนาด</th>
+                                <th className="p-3 text-right">จำนวนท่อน (4 ม.)</th>
+                                <th className="p-3 text-right">จำนวนอุปกรณ์ (ชิ้น/ตัว)</th>
+                                <th className="p-3 text-right">ความยาวรวม (ม.)</th>
+                                <th className="p-3 text-right">น้ำหนักรวม (กก.)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
+                              {categorySummaries.pvc.rows.map((row, idx) => (
+                                <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                                  <td className="p-3 font-bold text-slate-900 dark:text-white">{row.name}</td>
+                                  <td className="p-3 text-right">{row.isFitting ? '-' : `${row.bars4m} ท่อน`}</td>
+                                  <td className="p-3 text-right font-bold text-cyan-600">{row.isFitting ? `${row.pieces} ตัว` : '-'}</td>
+                                  <td className="p-3 text-right">{row.isFitting ? '-' : `${row.totalMeters.toFixed(2)} ม.`}</td>
+                                  <td className="p-3 text-right">{row.isFitting ? '-' : `${row.totalWeightKg.toFixed(2)} กก.`}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* ========================================================
                       ตารางรายการถอดเหล็กเส้น (BBS Cut List Table)
@@ -1585,7 +1951,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                               <th className="p-3 text-right">จำนวนชิ้น</th>
                               <th className="p-3 text-right font-bold text-emerald-600 dark:text-emerald-400">เส้นเต็มที่ใช้</th>
                               <th className="p-3 text-right font-bold text-amber-600 dark:text-amber-400">เศษเหลือ/เส้น (ม.)</th>
-                              <th className="p-3 text-right">เศษสูญ (%)</th>
+                              <th className="p-3 text-right font-bold text-amber-600 dark:text-amber-400">ท่อนเศษ</th>
                               <th className="p-3 text-right">น้ำหนักรวม (กก.)</th>
                               <th className="p-3 text-center">ผังตัด</th>
                               <th className="p-3 text-center">จัดการ</th>
@@ -1681,7 +2047,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                                     </td>
                                     <td className="p-3 text-right font-bold text-emerald-600 dark:text-emerald-400 text-sm">
                                       {item.materialCategory === 'plate' || (item.materialCategory === 'pvc' && (item.pvcType === 'fitting' || item.pvcType === 'valve')) ? '-' : (
-                                        <>${barsNeeded} <span className="text-[10px] font-normal text-slate-400">เส้น</span></>
+                                        <>{barsNeeded} <span className="text-[10px] font-normal text-slate-400">เส้น</span></>
                                       )}
                                     </td>
                                     <td className="p-3 text-right font-bold text-amber-600 dark:text-amber-400">
@@ -3123,9 +3489,10 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
             </div>
 
             {/* Top Category Tabs (5 หมวดงานหลัก) */}
-            <div className="grid grid-cols-5 p-2 bg-slate-100/80 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 gap-1 text-center">
+            <div className="grid grid-cols-3 sm:grid-cols-6 p-2 bg-slate-100/80 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 gap-1 text-center">
               {[
                 { id: 'rebar', icon: '🔩', title: 'เหล็กเส้น', sub: 'มอก. RB/DB' },
+                { id: 'concrete', icon: '🧱', title: 'ปูนคอนกรีต', sub: 'คิดปริมาณคิว' },
                 { id: 'beam', icon: '🏗️', title: 'เหล็กบีม', sub: 'H/I/WF' },
                 { id: 'plate', icon: '⬛', title: 'เหล็กเพลท', sub: 'Plate+J-Bolt' },
                 { id: 'box_c_pipe', icon: '📦', title: 'กล่อง/C/ท่อ', sub: 'เหล็กรูปพรรณ' },
@@ -3138,7 +3505,10 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     let defaultType = 'DB20';
                     let defaultStdLen = 12;
                     let defaultSub = 'H-Beam';
-                    if (cat.id === 'beam') { 
+                    if (cat.id === 'concrete') {
+                      defaultType = '240 ksc';
+                      defaultStdLen = 0;
+                    } else if (cat.id === 'beam') { 
                       defaultType = 'H 100x50x5x7 mm.'; 
                       defaultStdLen = 6; 
                       defaultSub = 'H-Beam';
@@ -3242,13 +3612,13 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-slate-800 dark:text-slate-200"
                       >
                         <optgroup label="เหล็กกล้าข้ออ้อย (Deformed Bar - DB)">
-                          {REBAR_STANDARDS.filter(r => r.type.startsWith('DB')).map(r => (
-                            <option key={r.type} value={r.type}>{r.type} ({r.weight} กก./ม.)</option>
+                          {REBAR_STANDARDS.filter(r => (r.size || '').startsWith('DB')).map(r => (
+                            <option key={r.size} value={r.size}>{r.size} ({r.weight} กก./ม.)</option>
                           ))}
                         </optgroup>
                         <optgroup label="เหล็กเส้นกลม (Round Bar - RB)">
-                          {REBAR_STANDARDS.filter(r => r.type.startsWith('RB')).map(r => (
-                            <option key={r.type} value={r.type}>{r.type} ({r.weight} กก./ม.)</option>
+                          {REBAR_STANDARDS.filter(r => (r.size || '').startsWith('RB')).map(r => (
+                            <option key={r.size} value={r.size}>{r.size} ({r.weight} กก./ม.)</option>
                           ))}
                         </optgroup>
                       </select>
@@ -3264,8 +3634,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                         onChange={(e) => setRebarForm({ ...rebarForm, standardLength: Number(e.target.value) })}
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold disabled:opacity-50"
                       >
-                        <option value={6}>6.00 เมตร (สเปก 6m)</option>
-                        <option value={10}>10.00 เมตร (สเปก 10m)</option>
+                        <option value={10}>10.00 เมตร (สเปกมาตรฐาน 10m)</option>
                         <option value={12}>12.00 เมตร (สเปกมาตรฐาน 12m)</option>
                       </select>
                     </div>
@@ -3325,6 +3694,136 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                         )}
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* ========================================================
+                  หมวด 1.5: ปูนคอนกรีต (Concrete Takeoff)
+                 ======================================================== */}
+              {rebarForm.materialCategory === 'concrete' && (
+                <div className="space-y-3.5 p-3.5 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-amber-900 dark:text-amber-300 text-xs flex items-center gap-1.5">
+                      🧱 หมวดงานปูนคอนกรีตผสมเสร็จ (คิดปริมาณคิว m³)
+                    </span>
+                    <label className="flex items-center gap-1.5 text-[11px] text-amber-700 dark:text-amber-400 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={rebarForm.customType}
+                        onChange={(e) => setRebarForm({ ...rebarForm, customType: e.target.checked })}
+                        className="rounded text-amber-600 w-3.5 h-3.5"
+                      />
+                      <span>พิมพ์สเปกเอง</span>
+                    </label>
+                  </div>
+
+                  {/* กำลังอัดคอนกรีต */}
+                  <div>
+                    <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                      กำลังอัดคอนกรีต (Compressive Strength)
+                    </label>
+                    {!rebarForm.customType ? (
+                      <select
+                        value={rebarForm.concreteStrength || '240 ksc'}
+                        onChange={(e) => setRebarForm({ ...rebarForm, concreteStrength: e.target.value, rebarType: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 font-bold text-amber-900 dark:text-amber-200 text-xs"
+                      >
+                        {CONCRETE_STRENGTHS.map((cs) => (
+                          <option key={cs.value} value={cs.value}>
+                            {cs.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={rebarForm.concreteStrength || ''}
+                        onChange={(e) => setRebarForm({ ...rebarForm, concreteStrength: e.target.value, rebarType: e.target.value })}
+                        placeholder="เช่น 280 ksc (Cylinder) ปูนทนซัลเฟต"
+                        className="w-full px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 font-semibold"
+                      />
+                    )}
+                  </div>
+
+                  {/* มิติชิ้นส่วน: กว้าง x ยาว x หนา/ลึก (เมตร) */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                        กว้าง (ม.)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        required
+                        value={rebarForm.concreteWidth || ''}
+                        onChange={(e) => setRebarForm({ ...rebarForm, concreteWidth: Number(e.target.value) })}
+                        placeholder="0.50"
+                        className="w-full px-2.5 py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 font-semibold text-center"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                        ยาว (ม.)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        required
+                        value={rebarForm.concreteLength || ''}
+                        onChange={(e) => setRebarForm({ ...rebarForm, concreteLength: Number(e.target.value) })}
+                        placeholder="4.00"
+                        className="w-full px-2.5 py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 font-semibold text-center"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                        ลึก/หนา/สูง (ม.)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        required
+                        value={rebarForm.concreteDepth || ''}
+                        onChange={(e) => setRebarForm({ ...rebarForm, concreteDepth: Number(e.target.value) })}
+                        placeholder="0.50"
+                        className="w-full px-2.5 py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 font-semibold text-center"
+                      />
+                    </div>
+                  </div>
+
+                  {/* จำนวนชิ้น/จุด และ เผื่อเท % */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                        จำนวนชิ้นส่วน (จุด / ฐาน / ต้น)
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        required
+                        value={rebarForm.quantity || 1}
+                        onChange={(e) => setRebarForm({ ...rebarForm, quantity: Math.max(1, parseInt(e.target.value) || 1) })}
+                        className="w-full px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 font-bold text-center"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                        เผื่อเท / Slump Loss (%)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        max="20"
+                        value={rebarForm.concreteWastePercent !== undefined ? rebarForm.concreteWastePercent : 5}
+                        onChange={(e) => setRebarForm({ ...rebarForm, concreteWastePercent: Number(e.target.value) })}
+                        className="w-full px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 font-bold text-center"
+                      />
+                    </div>
                   </div>
                 </div>
               )}
@@ -3743,8 +4242,19 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                  ======================================================== */}
               {rebarForm.materialCategory === 'pvc' && (
                 <div className="space-y-3.5 p-3.5 rounded-2xl bg-cyan-50/50 dark:bg-cyan-950/20 border border-cyan-200 dark:border-cyan-900/50">
-                  <div className="font-bold text-cyan-900 dark:text-cyan-300 text-xs flex items-center gap-1.5">
-                    💧 หมวดงานท่อ PVC และอุปกรณ์ข้อต่อ/วาล์ว
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-cyan-900 dark:text-cyan-300 text-xs flex items-center gap-1.5">
+                      💧 หมวดงานท่อ PVC และอุปกรณ์ข้อต่อ/วาล์ว
+                    </span>
+                    <label className="flex items-center gap-1.5 text-[11px] text-cyan-700 dark:text-cyan-400 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={rebarForm.customType}
+                        onChange={(e) => setRebarForm({ ...rebarForm, customType: e.target.checked })}
+                        className="rounded text-cyan-600 w-3.5 h-3.5"
+                      />
+                      <span>พิมพ์สเปกเอง (Custom)</span>
+                    </label>
                   </div>
 
                   <div className="flex gap-1.5 mb-2">
@@ -3785,7 +4295,36 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     ))}
                   </div>
 
-                  {rebarForm.subCategory !== 'fitting' ? (
+                  {rebarForm.customType ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                          ระบุชื่อ/ขนาดท่อ หรือ ข้อต่อ PVC
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={rebarForm.rebarType}
+                          onChange={(e) => setRebarForm({ ...rebarForm, rebarType: e.target.value })}
+                          placeholder="เช่น ท่อ PVC 2 นิ้ว ชั้น 8.5"
+                          className="w-full px-3 py-2 rounded-xl border border-cyan-200 dark:border-cyan-800 bg-white dark:bg-slate-900 font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                          น้ำหนัก (กก./เมตร หรือ กก./ชิ้น)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={rebarForm.customWeight || ''}
+                          onChange={(e) => setRebarForm({ ...rebarForm, customWeight: e.target.value })}
+                          placeholder="เช่น 1.05"
+                          className="w-full px-3 py-2 rounded-xl border border-cyan-200 dark:border-cyan-800 bg-white dark:bg-slate-900 font-semibold"
+                        />
+                      </div>
+                    </div>
+                  ) : rebarForm.subCategory !== 'fitting' ? (
                     <div>
                       <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
                         เลือกขนาดท่อ PVC (ความยาวมาตรฐาน 4.00 เมตร)
@@ -3797,7 +4336,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                       >
                         {(rebarForm.subCategory === 'pipe_135' ? PVC_135_STANDARDS : PVC_85_STANDARDS).map((p, i) => (
                           <option key={i} value={p.label}>
-                            {p.label} — {p.weight4m} กก./4ม. ({p.weight} กก./ม.)
+                            {p.size || p.label} — {p.weight4m} กก./4ม. ({p.weight} กก./ม.)
                           </option>
                         ))}
                       </select>
@@ -3854,7 +4393,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
               )}
 
               {/* ความยาวที่ตัดใช้ และ จำนวนท่อน (สำหรับหมวดตัดเชิงเส้น) */}
-              {rebarForm.materialCategory !== 'plate' && !(rebarForm.materialCategory === 'pvc' && rebarForm.subCategory === 'fitting') && (
+              {rebarForm.materialCategory !== 'plate' && rebarForm.materialCategory !== 'concrete' && !(rebarForm.materialCategory === 'pvc' && rebarForm.subCategory === 'fitting') && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
@@ -3924,7 +4463,16 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                   📊 สรุปผลการคำนวณอัตโนมัติ (Live Calculation):
                 </div>
 
-                {rebarForm.materialCategory === 'plate' ? (
+                {rebarForm.materialCategory === 'concrete' ? (
+                  <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700 dark:text-slate-300">
+                    <div>ปริมาตรสุทธิ: <b className="text-amber-600 dark:text-amber-400 font-bold">{currentCalc.netVolume || 0} คิว (m³)</b></div>
+                    <div>เผื่อเท ({currentCalc.wastePercent || 5}%): <b>+{currentCalc.wasteVolume || 0} คิว</b></div>
+                    <div className="col-span-2 bg-amber-50 dark:bg-amber-950/40 p-2 rounded-xl border border-amber-200 dark:border-amber-800">
+                      ปริมาตรรวมสั่ง: <b className="text-amber-700 dark:text-amber-300 text-sm font-extrabold">{currentCalc.totalVolume || 0} คิว</b>
+                      <span className="text-slate-500 ml-2">({((currentCalc.totalWeightKg || 0) / 1000).toFixed(3)} ตัน)</span>
+                    </div>
+                  </div>
+                ) : rebarForm.materialCategory === 'plate' ? (
                   <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700 dark:text-slate-300">
                     <div>รวมแผ่นเพลท: <b className="text-purple-600 dark:text-purple-400">{rebarForm.quantity} แผ่น</b></div>
                     <div>น้ำหนักเพลทรวม: <b>{currentCalc.totalPlateWeightKg} กก.</b></div>

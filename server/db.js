@@ -439,7 +439,58 @@ export function calculateRebarMetrics(data) {
   const group = data.group || data.category || 'งานโครงสร้างทั่วไป';
   const isReused = Boolean(data.isReusedOffcut || data.reusedOffcutId);
 
-  // 1. กรณีหมวดงาน: เหล็กเพลท (Steel Plate)
+  // 1. กรณีหมวดงาน: ปูนคอนกรีต (Concrete Takeoff)
+  if (materialCategory === 'concrete') {
+    const concreteWidth = Number(data.concreteWidth) || 1.0; // ม.
+    const concreteLength = Number(data.concreteLength) || 1.0; // ม.
+    const concreteDepth = Number(data.concreteDepth || data.concreteHeight) || 1.0; // ม.
+    const concreteStrength = (data.concreteStrength || data.rebarType || '240 ksc').trim();
+    const wastePercent = Number(data.wastePercent !== undefined ? data.wastePercent : (data.concreteWastePercent !== undefined ? data.concreteWastePercent : 5.0));
+    
+    const netVolume = Number((concreteWidth * concreteLength * concreteDepth * quantity).toFixed(3)); // คิว (m³)
+    const wasteVolume = Number((netVolume * (wastePercent / 100)).toFixed(3));
+    const totalVolume = Number((netVolume + wasteVolume).toFixed(3)); // รวมเผื่อเท (คิว)
+    const totalWeightKg = Number((totalVolume * 2400).toFixed(2)); // คอนกรีต 2,400 กก./คิว
+
+    return {
+      ...data,
+      id: data.id || `concrete-${Date.now()}`,
+      materialCategory: 'concrete',
+      label,
+      member: label,
+      group,
+      category: group,
+      rebarType: `คอนกรีต ${concreteStrength}`,
+      barType: `คอนกรีต ${concreteStrength}`,
+      concreteStrength,
+      concreteWidth,
+      concreteLength,
+      concreteDepth,
+      concreteHeight: concreteDepth,
+      quantity,
+      netVolume,
+      wasteVolume,
+      totalVolume,
+      wastePercent,
+      scrapPercent: wastePercent,
+      weightKg: totalWeightKg,
+      totalWeightKg,
+      unitWeight: 2400,
+      standardBarsNeeded: 0,
+      barsNeeded: 0,
+      standardLength: 0,
+      cutLength: 0,
+      piecesPerBar: 0,
+      piecesPerStandardBar: 0,
+      offcutPerBar: 0,
+      totalCutLength: 0,
+      totalMaterialLength: 0,
+      totalOffcutLength: 0,
+      offcutQuantity: 0
+    };
+  }
+
+  // 2. กรณีหมวดงาน: เหล็กเพลท (Steel Plate)
   if (materialCategory === 'plate') {
     const plateWidth = Number(data.plateWidth) || 300; // mm
     const plateLength = Number(data.plateLength) || 300; // mm
@@ -561,6 +612,10 @@ export function calculateRebarMetrics(data) {
   const weightKg = Number((totalCutLength * weightPerMeter).toFixed(2));
   const totalOrderWeightKg = Number((totalMaterialLength * weightPerMeter).toFixed(2));
 
+  // คำนวณจำนวนท่อนเศษ (Offcut Quantity)
+  // เช่น 12m ตัด 5.3m ได้ 2 ชิ้น/เส้น ใช้ 32 เส้น จะเกิดเศษท่อนละ 1.4m จำนวน 16 ท่อน (32 / 2)
+  const offcutQuantity = Number(data.offcutQuantity) || (piecesPerStandardBar > 1 ? Math.floor(barsNeeded / piecesPerStandardBar) : barsNeeded) || 1;
+
   return {
     ...data,
     id: data.id || `item-${Date.now()}`,
@@ -579,6 +634,7 @@ export function calculateRebarMetrics(data) {
     standardBarsNeeded: barsNeeded,
     barsNeeded,
     offcutPerBar,
+    offcutQuantity,
     totalCutLength,
     totalMaterialLength,
     totalOffcutLength,
@@ -1180,9 +1236,9 @@ export const DataService = {
     }
 
     // หากมีการตัดที่ทำให้เกิดเศษ และไม่ใช่การดึงเศษมาใช้ -> บันทึกเข้าคลังเศษเหล็กอัตโนมัติ
-    // โดยจำนวนท่อนเศษที่เกิด เท่ากับจำนวนเส้นมาตรฐานที่นำมาตัด (barsNeeded)
-    if (calculated.totalOffcutLength > 0 && !calculated.isReusedOffcut && calculated.materialCategory !== 'plate') {
-      const offcutQuantity = calculated.barsNeeded || 1;
+    // โดยจำนวนท่อนเศษที่เกิด เท่ากับ calculated.offcutQuantity (เช่น 16 ท่อน)
+    if (calculated.totalOffcutLength > 0 && !calculated.isReusedOffcut && calculated.materialCategory !== 'plate' && calculated.materialCategory !== 'concrete') {
+      const offcutQuantity = calculated.offcutQuantity || (calculated.piecesPerStandardBar > 1 ? Math.floor(calculated.barsNeeded / calculated.piecesPerStandardBar) : calculated.barsNeeded) || 1;
       await this.createRebarOffcut({
         sourceLabel: calculated.label,
         rebarType: calculated.rebarType,
