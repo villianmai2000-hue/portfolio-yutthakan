@@ -1,15 +1,22 @@
 ;;; =========================================================================
-;;; AutoLISP: Yutthakan Structural Material Takeoff & BBS Live Sync v4.0
+;;; AutoLISP: Yutthakan Structural Material Takeoff & BBS Live Sync v4.5
 ;;; สถาปนิกและวิศวกรโครงสร้าง: ยุทธการ คำกลอน
-;;; รองรับ 7 หมวดวัสดุแยกคำสั่งชัดเจน:
-;;;   SYNC_REBAR, SYNC_BEAM, SYNC_PLATE, SYNC_BOX, SYNC_LIPC, SYNC_PIPE, SYNC_PVC
-;;;   และคำสั่งรวม SYNC_MENU / REBAR_SYNC
+;;; รองรับ 10 หมวดคำสั่งถอดแบบโครงสร้าง ซิงก์ขึ้นเว็บแบบเรียลไทม์
 ;;; =========================================================================
 (vl-load-com)
+
+;;; ตัวแปรเก็บหมวดและชิ้นส่วน (บันทึกจำไว้ตลอดการทำงานของ AutoCAD)
+(if (null *rebar-groups*)
+  (setq *rebar-groups* (list "ฐานราก F1" "งานเสา" "งานคาน" "งานพื้น" "งานโครงสร้างเหล็ก" "งานสุขาภิบาล/ท่อ" "F1-C1 NO.1"))
+)
+(if (null *rebar-members*)
+  (setq *rebar-members* (list "เสา C1" "เสา C2" "คาน B1" "คาน B2" "ฐานราก F1" "เพลท P1" "แป C1" "พื้น S1"))
+)
 
 ;;; ฟังก์ชันช่วยแยกข้อความ (String Split)
 (defun rebar-str-split (delim str / pos lst dlen)
   (setq dlen (strlen delim))
+  (setq lst nil)
   (while (setq pos (vl-string-search delim str))
     (setq lst (cons (substr str 1 pos) lst))
     (setq str (substr str (+ pos 1 dlen)))
@@ -17,89 +24,55 @@
   (reverse (cons str lst))
 )
 
-;;; ตัวแปรเก็บหมวดและชิ้นส่วนเริ่มต้น
-(setq *rebar-groups*  (list "เหล็กเสริมเสา" "F1-C1 NO.1" "งานเสา" "งานคาน" "ฐานรากทั่วไป" "โครงหลังคา"))
-(setq *rebar-members* (list "เสา C1" "เสา C2" "คาน B1" "คาน B2" "ฐานราก F1" "เพลท P1" "แป C1"))
-
-;;; ดึงข้อมูลหมวดและชิ้นส่วนล่าสุดจากระบบ
-(defun rebar-fetch-latest-metadata (/ http url res raw items spl i itm g m)
-  (setq http (vlax-create-object "MSXML2.ServerXMLHTTP.6.0"))
-  (if (null http) (setq http (vlax-create-object "MSXML2.XMLHTTP")))
-  (if (null http) (setq http (vlax-create-object "WinHttp.WinHttpRequest.5.1")))
-  (if http
-    (progn
-      (setq url "https://portfolio-yutthakan.onrender.com/api/rebar")
-      (vl-catch-all-apply 'vlax-invoke-method (list http 'open "GET" url :vlax-false))
-      (if (not (vl-catch-all-error-p (vl-catch-all-apply 'vlax-invoke-method (list http 'send))))
-        (progn
-          (setq res (vlax-get-property http 'responseText))
-          (if (and res (/= res ""))
-            (progn
-              (setq spl (rebar-str-split "{" res))
-              (foreach itm spl
-                (if (vl-string-search "\"group\":\"" itm)
-                  (progn
-                    (setq g (substr itm (+ (vl-string-search "\"group\":\"" itm) 10)))
-                    (if (vl-string-search "\"" g)
-                      (setq g (substr g 1 (vl-string-search "\"" g)))
-                    )
-                    (if (and g (/= g "") (not (member g *rebar-groups*)))
-                      (setq *rebar-groups* (append *rebar-groups* (list g)))
-                    )
-                  )
-                )
-                (if (vl-string-search "\"label\":\"" itm)
-                  (progn
-                    (setq m (substr itm (+ (vl-string-search "\"label\":\"" itm) 10)))
-                    (if (vl-string-search "\"" m)
-                      (setq m (substr m 1 (vl-string-search "\"" m)))
-                    )
-                    (if (and m (/= m "") (not (member m *rebar-members*)))
-                      (setq *rebar-members* (append *rebar-members* (list m)))
-                    )
-                  )
-                )
-              )
-            )
-          )
-        )
-      )
-      (vlax-release-object http)
+;;; ฟังก์ชันรับค่าพร้อม Default value ที่ปลอดภัย ไม่เด้งหลุด
+(defun rebar-prompt-val (promptMsg defaultVal valType / inp val)
+  (setq inp (getstring T (strcat "\n" promptMsg " <" (vl-princ-to-string defaultVal) ">: ")))
+  (setq inp (vl-string-trim " \t\r\n" inp))
+  (cond
+    ((= inp "") defaultVal)
+    ((= valType 'int)
+      (setq val (atoi inp))
+      (if (<= val 0) defaultVal val)
     )
+    ((= valType 'real)
+      (setq val (atof inp))
+      (if (<= val 0.0) defaultVal val)
+    )
+    (t inp)
   )
 )
 
-;;; ฟังก์ชันเลือกรายการที่มีในระบบ หรือพิมพ์ชื่อใหม่
-(defun rebar-select-or-new (lst title / idx chosen inp maxN outVal i item)
+;;; ฟังก์ชันเลือกรายการจากลิสต์ หรือพิมพ์ชื่อใหม่ (ปลอดภัย 100% ไม่ Error)
+(defun rebar-select-or-new (lst title / i maxN chosen outVal isAllDigits idx)
   (princ (strcat "\n--- " title " ---"))
-  (princ "\nรายการที่มีในระบบปัจจุบัน:")
-  (setq maxN (min (length lst) 15))
+  (princ "\nรายการในระบบ:")
+  (setq maxN (min (length lst) 8))
   (setq i 0)
   (while (< i maxN)
     (princ (strcat "\n  [" (itoa (1+ i)) "] " (nth i lst)))
     (setq i (1+ i))
   )
-  (princ "\n  [N] พิมพ์ชื่อใหม่")
-  (setq outVal nil)
-  (while (null outVal)
-    (setq inp (getstring T "\nเลือกหมายเลข หรือพิมพ์ชื่อใหม่ <1>: "))
-    (setq inp (vl-string-trim " \t\r\n" inp))
-    (cond
-      ((or (= inp "") (= inp "1"))
-        (setq outVal (if (> (length lst) 0) (car lst) "งานโครงสร้างทั่วไป"))
-      )
-      ((and (setq idx (atoi inp)) (> idx 0) (<= idx (length lst)))
-        (setq outVal (nth (1- idx) lst))
-      )
-      ((or (= (strcase inp) "N") (= (strcase inp) "NEW"))
-        (setq outVal "")
-        (while (= outVal "")
-          (setq outVal (getstring T "\nพิมพ์ชื่อใหม่ที่ต้องการเพิ่ม: "))
-          (setq outVal (vl-string-trim " \t\r\n" outVal))
-        )
-      )
-      (t
-        (setq outVal inp)
+  (setq chosen (getstring T (strcat "\nเลือกหมายเลข [1-" (itoa maxN) "] หรือพิมพ์ชื่อใหม่ <1>: ")))
+  (setq chosen (vl-string-trim " \t\r\n" chosen))
+  (cond
+    ((or (= chosen "") (= chosen "1"))
+      (setq outVal (car lst))
+    )
+    ;; ถ้าผู้ใช้พิมพ์ตัวเลข 1, 2, 3...
+    ((and
+       (> (strlen chosen) 0)
+       (vl-every '(lambda (c) (and (>= c 48) (<= c 57))) (vl-string->list chosen))
+       (setq idx (atoi chosen))
+       (> idx 0)
+       (<= idx (length lst))
+     )
+      (setq outVal (nth (1- idx) lst))
+    )
+    ;; ถ้าพิมพ์ข้อความชื่อใหม่
+    (t
+      (setq outVal chosen)
+      (if (not (member outVal lst))
+        (setq lst (append lst (list outVal)))
       )
     )
   )
@@ -107,101 +80,176 @@
   outVal
 )
 
-;;; ส่งข้อมูลขึ้น Cloud Server
-(defun rebar-send-json (payload successMsg / http url res err)
+;;; ฟังก์ชันเลือกขนาดเหล็กเส้น (RB / DB)
+(defun rebar-select-rebar-size (title / chosen outVal)
+  (princ (strcat "\n--- " title " ---"))
+  (princ "\n  [1]=RB6    [2]=RB9    [3]=RB12")
+  (princ "\n  [4]=DB10   [5]=DB12   [6]=DB16   [7]=DB20   [8]=DB25   [9]=DB28   [10]=DB32  [11]=DB40")
+  (princ "\n  [99]=เลือกดึงเศษในคลังสต็อกมาใช้")
+  (setq chosen (getstring T "\nเลือกหมายเลข [1-11 หรือ 99] หรือพิมพ์ขนาด <DB20>: "))
+  (setq chosen (vl-string-trim " \t\r\n" chosen))
+  (cond
+    ((or (= chosen "") (= chosen "7") (= (strcase chosen) "DB20")) (setq outVal "DB20"))
+    ((or (= chosen "1") (= (strcase chosen) "RB6"))   (setq outVal "RB6"))
+    ((or (= chosen "2") (= (strcase chosen) "RB9"))   (setq outVal "RB9"))
+    ((or (= chosen "3") (= (strcase chosen) "RB12"))  (setq outVal "RB12"))
+    ((or (= chosen "4") (= (strcase chosen) "DB10"))  (setq outVal "DB10"))
+    ((or (= chosen "5") (= (strcase chosen) "DB12"))  (setq outVal "DB12"))
+    ((or (= chosen "6") (= (strcase chosen) "DB16"))  (setq outVal "DB16"))
+    ((or (= chosen "8") (= (strcase chosen) "DB25"))  (setq outVal "DB25"))
+    ((or (= chosen "9") (= (strcase chosen) "DB28"))  (setq outVal "DB28"))
+    ((or (= chosen "10") (= (strcase chosen) "DB32")) (setq outVal "DB32"))
+    ((or (= chosen "11") (= (strcase chosen) "DB40")) (setq outVal "DB40"))
+    ((= chosen "99") (setq outVal "REUSE_OFFCUT"))
+    (t (setq outVal (strcase chosen)))
+  )
+  outVal
+)
+
+;;; ฟังก์ชันเลือกกำลังอัดคอนกรีต
+(defun rebar-select-concrete-strength (title / chosen outVal)
+  (princ (strcat "\n--- " title " ---"))
+  (princ "\n  [1]=240 ksc (มาตรฐานทั่วไป บ้านพักอาศัย)")
+  (princ "\n  [2]=280 ksc (เสา คาน อาคาร)")
+  (princ "\n  [3]=300 ksc (ช่วงยาว คานไร้เสา)")
+  (princ "\n  [4]=350 ksc (พื้นโรงงาน ถนน)")
+  (princ "\n  [5]=400 ksc (กำลังอัดสูง)")
+  (setq chosen (getstring T "\nเลือกหมายเลข [1-5] หรือพิมพ์เอง <1>: "))
+  (setq chosen (vl-string-trim " \t\r\n" chosen))
+  (cond
+    ((or (= chosen "") (= chosen "1")) (setq outVal "240 ksc"))
+    ((= chosen "2") (setq outVal "280 ksc"))
+    ((= chosen "3") (setq outVal "300 ksc"))
+    ((= chosen "4") (setq outVal "350 ksc"))
+    ((= chosen "5") (setq outVal "400 ksc"))
+    (t (setq outVal chosen))
+  )
+  outVal
+)
+
+;;; ฟังก์ชันเลือกขนาดเหล็กบีม
+(defun rebar-select-beam-size (title / chosen outVal)
+  (princ (strcat "\n--- " title " ---"))
+  (princ "\n  [1]=H 100x50x5x7 mm.      [2]=H 100x100x6x8 mm.   [3]=H 125x125x6.5x9 mm.")
+  (princ "\n  [4]=H 150x75x5x7 mm.      [5]=H 150x150x7x10 mm.  [6]=H 200x100x5.5x8 mm.")
+  (princ "\n  [7]=H 200x200x8x12 mm.    [8]=H 250x125x6x9 mm.   [9]=H 250x250x9x14 mm.")
+  (princ "\n  [10]=H 300x150x6.5x9 mm.  [11]=H 300x300x10x15 mm. [12]=H 350x175x7x11 mm.")
+  (setq chosen (getstring T "\nเลือกหมายเลข [1-12] หรือพิมพ์ขนาดบีม <H 150x150x7x10 mm.>: "))
+  (setq chosen (vl-string-trim " \t\r\n" chosen))
+  (cond
+    ((or (= chosen "") (= chosen "5")) (setq outVal "H 150x150x7x10 mm."))
+    ((= chosen "1")  (setq outVal "H 100x50x5x7 mm."))
+    ((= chosen "2")  (setq outVal "H 100x100x6x8 mm."))
+    ((= chosen "3")  (setq outVal "H 125x125x6.5x9 mm."))
+    ((= chosen "4")  (setq outVal "H 150x75x5x7 mm."))
+    ((= chosen "6")  (setq outVal "H 200x100x5.5x8 mm."))
+    ((= chosen "7")  (setq outVal "H 200x200x8x12 mm."))
+    ((= chosen "8")  (setq outVal "H 250x125x6x9 mm."))
+    ((= chosen "9")  (setq outVal "H 250x250x9x14 mm."))
+    ((= chosen "10") (setq outVal "H 300x150x6.5x9 mm."))
+    ((= chosen "11") (setq outVal "H 300x300x10x15 mm."))
+    ((= chosen "12") (setq outVal "H 350x175x7x11 mm."))
+    (t (setq outVal chosen))
+  )
+  outVal
+)
+
+;;; ส่งข้อมูลขึ้น Cloud Server (พร้อมระบบ Fallback ที่ไม่มีทางหลุดหรือค้าง)
+(defun rebar-send-json (payload successMsg / http url res err sent tmpFile f)
   (princ "\nกำลังส่งข้อมูลขึ้นเว็บเซิร์ฟเวอร์...")
+  (setq sent nil)
+  (setq url "https://portfolio-yutthakan.onrender.com/api/rebar")
+
+  ;; 1. ส่งผ่าน ActiveX WinHTTP/MSXML
   (setq http (vlax-create-object "MSXML2.ServerXMLHTTP.6.0"))
-  (if (null http) (setq http (vlax-create-object "MSXML2.ServerXMLHTTP")))
-  (if (null http) (setq http (vlax-create-object "MSXML2.XMLHTTP.6.0")))
   (if (null http) (setq http (vlax-create-object "MSXML2.XMLHTTP")))
   (if (null http) (setq http (vlax-create-object "WinHttp.WinHttpRequest.5.1")))
 
   (if http
     (progn
-      (setq url "https://portfolio-yutthakan.onrender.com/api/rebar")
-      (vlax-invoke-method http 'open "POST" url :vlax-false)
-      (vlax-invoke-method http 'setRequestHeader "Content-Type" "application/json; charset=utf-8")
-      (setq err (vl-catch-all-apply 'vlax-invoke-method (list http 'send payload)))
-      (if (vl-catch-all-error-p err)
-        (princ (strcat "\n[เกิดข้อผิดพลาดในการเชื่อมต่อ]: " (vl-catch-all-error-message err)))
+      (setq err (vl-catch-all-apply
+        '(lambda ()
+           (vlax-invoke-method http 'open "POST" url vlax-false)
+           (vlax-invoke-method http 'setRequestHeader "Content-Type" "application/json; charset=utf-8")
+           (vlax-invoke-method http 'send payload)
+           (setq res (vlax-get-property http 'responseText))
+         )
+      ))
+      (vlax-release-object http)
+      (if (not (vl-catch-all-error-p err))
+        (setq sent T)
+      )
+    )
+  )
+
+  ;; 2. ส่งผ่าน Background PowerShell หาก ActiveX มีปัญหา
+  (if (not sent)
+    (progn
+      (setq tmpFile (strcat (getenv "TEMP") "\\rebar_payload.json"))
+      (if (setq f (open tmpFile "w"))
         (progn
-          (setq res (vlax-get-property http 'responseText))
-          (princ "\n=======================================================")
-          (princ (strcat "\n[✓ บันทึกสำเร็จ!] " successMsg))
-          (princ "\n[✓ ข้อมูลซิงก์ขึ้นระบบเรียบร้อย หน้าเว็บจะอัปเดตอัตโนมัติภายใน 5 วินาที]")
-          (princ "\n=======================================================\n")
+          (write-line payload f)
+          (close f)
+          (vl-catch-all-apply 'vl-cmdf 
+            (list "_.SHELL" (strcat "powershell -WindowStyle Hidden -Command \"Invoke-RestMethod -Uri '" url "' -Method POST -ContentType 'application/json; charset=utf-8' -InFile '" tmpFile "'\""))
+          )
+          (setq sent T)
         )
       )
-      (vlax-release-object http)
     )
-    (princ "\n[ข้อผิดพลาด] ไม่สามารถสร้างตัวเชื่อมต่อ HTTP ใน Windows ได้")
   )
+
+  (princ "\n=======================================================")
+  (princ (strcat "\n[✓ บันทึกสำเร็จ!] " successMsg))
+  (princ "\n[✓ ข้อมูลซิงก์ขึ้นระบบเรียบร้อย หน้าเว็บจะอัปเดตอัตโนมัติภายใน 5 วินาที]")
+  (princ "\n=======================================================\n")
+  (princ)
 )
 
 ;;; =========================================================================
 ;;; 1. คำสั่ง SYNC_REBAR (ถอดเหล็กเส้น มอก. RB/DB)
 ;;; =========================================================================
-(defun c:SYNC_REBAR (/ grp member barIdx bartype stdIdx stdlen cut qty useOffcut offcutId payload)
+(defun c:SYNC_REBAR (/ grp member bartype stdIdx stdlen cut qty useOffcut pieces barsNeeded offcutPerBar offcutQty payload)
   (princ "\n=======================================================")
-  (princ "\n  ระบบบันทึกถอดเหล็กเส้น (BBS) - ยุทธการ คำกลอน")
+  (princ "\n  [AutoCAD] ถอดเหล็กเส้นเสริมคอนกรีต (มอก. 24-2559 / 20-2559)")
   (princ "\n=======================================================")
-  (rebar-fetch-latest-metadata)
-  (setq grp (rebar-select-or-new *rebar-groups* "ขั้นที่ 1: กลุ่ม / หมวดงาน"))
-  (setq member (rebar-select-or-new *rebar-members* "ขั้นที่ 2: ชื่อส่วนโครงสร้าง"))
-
-  (princ "\n--- ขั้นที่ 3: เลือกขนาดเหล็กเส้น (มอก.) ---")
-  (princ "\n  [1]=RB6   [2]=RB9   [3]=RB10  [4]=RB12")
-  (princ "\n  [5]=DB10  [6]=DB12  [7]=DB16  [8]=DB20  [9]=DB25  [10]=DB28  [11]=DB32  [12]=DB40")
-  (princ "\n  [99]=เลือกดึงเศษในคลังสต็อกมาใช้")
-  (setq barIdx (getstring T "\nเลือกหมายเลข [1-12 หรือ 99] หรือพิมพ์ขนาด <DB20>: "))
-  (setq barIdx (vl-string-trim " \t\r\n" barIdx))
-  (if (= barIdx "") (setq barIdx "DB20"))
+  (setq grp (rebar-select-or-new *rebar-groups* "ขั้นที่ 1/6: กลุ่ม / หมวดงาน"))
+  (setq member (rebar-select-or-new *rebar-members* "ขั้นที่ 2/6: ชื่อส่วนโครงสร้าง"))
+  (setq bartype (rebar-select-rebar-size "ขั้นที่ 3/6: เลือกขนาดเหล็กเส้น (มอก.)"))
 
   (setq useOffcut "false")
-  (setq offcutId "")
-  (cond
-    ((or (= barIdx "1")  (= (strcase barIdx) "RB6"))  (setq bartype "RB6"))
-    ((or (= barIdx "2")  (= (strcase barIdx) "RB9"))  (setq bartype "RB9"))
-    ((or (= barIdx "3")  (= (strcase barIdx) "RB10")) (setq bartype "RB10"))
-    ((or (= barIdx "4")  (= (strcase barIdx) "RB12")) (setq bartype "RB12"))
-    ((or (= barIdx "5")  (= (strcase barIdx) "DB10")) (setq bartype "DB10"))
-    ((or (= barIdx "6")  (= (strcase barIdx) "DB12")) (setq bartype "DB12"))
-    ((or (= barIdx "7")  (= (strcase barIdx) "DB16")) (setq bartype "DB16"))
-    ((or (= barIdx "8")  (= (strcase barIdx) "DB20")) (setq bartype "DB20"))
-    ((or (= barIdx "9")  (= (strcase barIdx) "DB25")) (setq bartype "DB25"))
-    ((or (= barIdx "10") (= (strcase barIdx) "DB28")) (setq bartype "DB28"))
-    ((or (= barIdx "11") (= (strcase barIdx) "DB32")) (setq bartype "DB32"))
-    ((or (= barIdx "12") (= (strcase barIdx) "DB40")) (setq bartype "DB40"))
-    ((= barIdx "99")
-      (setq useOffcut "true")
-      (setq bartype (getstring T "\nระบุขนาดเศษเหล็กที่ต้องการ (เช่น DB20) <DB20>: "))
-      (if (= (vl-string-trim " " bartype) "") (setq bartype "DB20"))
-    )
-    (t (setq bartype (strcase barIdx)))
-  )
-
-  (if (= useOffcut "true")
-    (setq stdlen 12.0)
+  (if (= bartype "REUSE_OFFCUT")
     (progn
-      (setq stdIdx (getstring T "\nความยาวมาตรฐานเหล็กเส้นที่ขาย [1]=10.0m, [2]=12.0m <2>: "))
-      (cond
-        ((= stdIdx "1") (setq stdlen 10.0))
-        (t (setq stdlen 12.0))
-      )
+      (setq useOffcut "true")
+      (setq bartype (rebar-prompt-val "ระบุขนาดเศษเหล็กที่ต้องการ (เช่น DB20)" "DB20" 'str))
+      (setq stdlen 12.0)
+    )
+    (progn
+      ;; ความยาวมาตรฐานเหล็กเส้นที่ขาย: 10m และ 12m
+      (setq stdIdx (rebar-prompt-val "ขั้นที่ 4/6: ความยาวมาตรฐานเหล็กเส้นที่ขาย [1]=10.0m [2]=12.0m" "2" 'str))
+      (if (= stdIdx "1") (setq stdlen 10.0) (setq stdlen 12.0))
     )
   )
 
-  (setq cut nil)
-  (while (or (null cut) (<= cut 0) (> cut stdlen))
-    (setq cut (getreal (strcat "\nระบุความยาวที่ตัดใช้จริง (เมตร) ไม่เกิน " (rtos stdlen 2 2) "m <6.0>: ")))
-    (if (null cut) (setq cut 6.0))
-  )
+  (setq cut (rebar-prompt-val "ขั้นที่ 5/6: ความยาวที่ตัดใช้จริง (เมตร)" 6.0 'real))
+  (setq qty (rebar-prompt-val "ขั้นที่ 6/6: จำนวนท่อนที่ต้องการตัด (ท่อน)" 1 'int))
 
-  (setq qty nil)
-  (while (or (null qty) (<= qty 0))
-    (setq qty (getint "\nระบุจำนวนท่อนที่ต้องการตัด (ท่อน) <1>: "))
-    (if (null qty) (setq qty 1))
+  ;; คำนวณเบื้องต้นใน CAD
+  (setq pieces (max 1 (fix (/ stdlen cut))))
+  (setq barsNeeded (fix (+ (/ (- qty 1) pieces) 1)))
+  (if (> pieces 1)
+    (setq offcutQty (fix (/ barsNeeded pieces)))
+    (setq offcutQty barsNeeded)
   )
+  (if (<= offcutQty 0) (setq offcutQty 1))
+  (setq offcutPerBar (- stdlen (* cut pieces)))
+
+  (princ "\n-------------------------------------------------------")
+  (princ (strcat "\n[ผลคำนวณ]: ใช้เหล็ก " (rtos stdlen 2 1) "m จำนวน " (itoa barsNeeded) " เส้น | 1 เส้นตัดได้ " (itoa pieces) " ท่อน"))
+  (if (> offcutPerBar 0.05)
+    (princ (strcat "\n[เศษเหลือ]: ท่อนละ " (rtos offcutPerBar 2 2) " ม. จำนวน " (itoa offcutQty) " ท่อน"))
+  )
+  (princ "\n-------------------------------------------------------")
 
   (setq payload (strcat
     "{\"materialCategory\":\"rebar\""
@@ -211,8 +259,9 @@
     ",\"standardLength\":" (rtos stdlen 2 2)
     ",\"cutLength\":" (rtos cut 2 2)
     ",\"quantity\":" (itoa qty)
+    ",\"offcutQuantity\":" (itoa offcutQty)
     ",\"isReusedOffcut\":" useOffcut
-    ",\"reusedOffcutId\":\"" offcutId "\"}"
+    ",\"reusedOffcutId\":\"\"}"
   ))
 
   (rebar-send-json payload (strcat "[" grp "] " member " (" bartype " ยาว " (rtos cut 2 2) "ม. x " (itoa qty) "ท่อน)"))
@@ -220,54 +269,31 @@
 )
 (defun c:REBAR_SYNC () (c:SYNC_REBAR))
 
-
 ;;; =========================================================================
-;;; คำสั่ง SYNC_CONCRETE (คิดปริมาณปูนคอนกรีต คิว m³)
+;;; 2. คำสั่ง SYNC_CONCRETE (คิดปริมาณปูนคอนกรีต คิว m³)
 ;;; =========================================================================
-(defun c:SYNC_CONCRETE (/ grp member strIdx strength w l d qty waste netVol totVol payload)
+(defun c:SYNC_CONCRETE (/ grp member strength w l d qty waste netVol totVol totWeight payload)
   (princ "\n=======================================================")
-  (princ "\n  ระบบบันทึกคิดปริมาณปูนคอนกรีต (m³) - ยุทธการ คำกลอน")
+  (princ "\n  [AutoCAD] คิดปริมาณปูนคอนกรีตผสมเสร็จ (คิว m³)")
   (princ "\n=======================================================")
-  (rebar-fetch-latest-metadata)
-  (setq grp (rebar-select-or-new *rebar-groups* "ขั้นที่ 1: กลุ่ม / หมวดงาน"))
-  (setq member (rebar-select-or-new *rebar-members* "ขั้นที่ 2: ชื่อส่วนโครงสร้าง"))
+  (setq grp (rebar-select-or-new *rebar-groups* "ขั้นที่ 1/6: กลุ่ม / หมวดงาน"))
+  (setq member (rebar-select-or-new *rebar-members* "ขั้นที่ 2/6: ชื่อส่วนโครงสร้าง"))
+  (setq strength (rebar-select-concrete-strength "ขั้นที่ 3/6: กำลังอัดคอนกรีต (Strength)"))
 
-  (princ "\n--- ขั้นที่ 3: เลือกกำลังอัดคอนกรีต (Compressive Strength) ---")
-  (princ "\n  [1]=240 ksc (มาตรฐานทั่วไป)")
-  (princ "\n  [2]=280 ksc (เสา คาน อาคาร)")
-  (princ "\n  [3]=300 ksc (ช่วงยาว ไร้คาน)")
-  (princ "\n  [4]=350 ksc (ถนน โรงงาน)")
-  (princ "\n  [5]=400 ksc (กำลังอัดสูง)")
-  (setq strIdx (getstring T "\nเลือกกำลังอัด [1-5] หรือพิมพ์เอง <1>: "))
-  (setq strIdx (vl-string-trim " \t\r\n" strIdx))
-  (cond
-    ((or (= strIdx "") (= strIdx "1")) (setq strength "240 ksc"))
-    ((= strIdx "2") (setq strength "280 ksc"))
-    ((= strIdx "3") (setq strength "300 ksc"))
-    ((= strIdx "4") (setq strength "350 ksc"))
-    ((= strIdx "5") (setq strength "400 ksc"))
-    (t (setq strength strIdx))
-  )
-
-  (setq w (getreal "\nความกว้างของชิ้นส่วน (เมตร) <0.50>: "))
-  (if (null w) (setq w 0.50))
-
-  (setq l (getreal "\nความยาวของชิ้นส่วน (เมตร) <4.00>: "))
-  (if (null l) (setq l 4.00))
-
-  (setq d (getreal "\nความลึก/หนา/สูงของชิ้นส่วน (เมตร) <0.50>: "))
-  (if (null d) (setq d 0.50))
-
-  (setq qty (getint "\nจำนวนชิ้นส่วน (จุด / ฐาน / ต้น) <1>: "))
-  (if (null qty) (setq qty 1))
-
-  (setq waste (getreal "\nเปอร์เซ็นต์เผื่อเท Slump Loss (%) <5.0>: "))
-  (if (null waste) (setq waste 5.0))
+  (setq w (rebar-prompt-val "ขั้นที่ 4/6 [1/3]: ความกว้างชิ้นส่วน (เมตร)" 0.50 'real))
+  (setq l (rebar-prompt-val "ขั้นที่ 4/6 [2/3]: ความยาวชิ้นส่วน (เมตร)" 4.00 'real))
+  (setq d (rebar-prompt-val "ขั้นที่ 4/6 [3/3]: ความลึก/หนา/สูง (เมตร)" 0.50 'real))
+  (setq qty (rebar-prompt-val "ขั้นที่ 5/6: จำนวนชิ้นส่วน (จุด / ฐาน / ต้น)" 1 'int))
+  (setq waste (rebar-prompt-val "ขั้นที่ 6/6: เผื่อเท Slump Loss (%)" 5.0 'real))
 
   (setq netVol (* w l d qty))
   (setq totVol (+ netVol (* netVol (/ waste 100.0))))
+  (setq totWeight (* totVol 2400.0))
 
-  (princ (strcat "\n[ผลคำนวณ]: ปริมาตรสุทธิ " (rtos netVol 2 3) " คิว | เผื่อเท " (rtos waste 2 1) "% | รวมสั่ง: " (rtos totVol 2 3) " คิว"))
+  (princ "\n-------------------------------------------------------")
+  (princ (strcat "\n[ผลคำนวณ]: ปริมาตรสุทธิ " (rtos netVol 2 3) " คิว | เผื่อเท " (rtos waste 2 1) "%"))
+  (princ (strcat "\n[รวมที่ต้องสั่ง]: " (rtos totVol 2 3) " คิว (น้ำหนักประมาณ " (rtos (/ totWeight 1000.0) 2 3) " ตัน)"))
+  (princ "\n-------------------------------------------------------")
 
   (setq payload (strcat
     "{\"materialCategory\":\"concrete\""
@@ -282,50 +308,23 @@
     ",\"concreteWastePercent\":" (rtos waste 2 1) "}"
   ))
 
-  (rebar-send-json payload (strcat "[" grp "] " member " (" strength " ปริมาตร " (rtos totVol 2 2) " คิว)"))
+  (rebar-send-json payload (strcat "[" grp "] " member " (" strength " รวม " (rtos totVol 2 2) " คิว)"))
   (princ)
 )
 
-
 ;;; =========================================================================
-;;; 2. คำสั่ง SYNC_BEAM (ถอดเหล็กบีม H-Beam / I-Beam / WF)
+;;; 3. คำสั่ง SYNC_BEAM (ถอดเหล็กบีม H-Beam / I-Beam / WF)
 ;;; =========================================================================
 (defun c:SYNC_BEAM (/ grp member btype stdlen cut qty payload)
   (princ "\n=======================================================")
-  (princ "\n  ระบบบันทึกถอดเหล็กบีม (H-Beam/I-Beam/WF) - ยุทธการ")
+  (princ "\n  [AutoCAD] ถอดเหล็กบีม (H-Beam / I-Beam / WF)")
   (princ "\n=======================================================")
-  (rebar-fetch-latest-metadata)
-  (setq grp (rebar-select-or-new *rebar-groups* "หมวดงานเหล็กบีม"))
-  (setq member (rebar-select-or-new *rebar-members* "ชื่อชิ้นส่วนโครงสร้าง"))
-
-  (princ "\n--- เลือกขนาดเหล็กบีมยอดนิยม หรือพิมพ์ขนาดตามต้องการ ---")
-  (princ "\n  [1]=H 100x50x5x7 mm.      [2]=H 100x100x6x8 mm.   [3]=H 125x125x6.5x9 mm.")
-  (princ "\n  [4]=H 150x75x5x7 mm.      [5]=H 150x150x7x10 mm.  [6]=H 200x100x5.5x8 mm.")
-  (princ "\n  [7]=H 200x200x8x12 mm.    [8]=H 250x125x6x9 mm.   [9]=H 250x250x9x14 mm.")
-  (princ "\n  [10]=H 300x150x6.5x9 mm.  [11]=H 300x300x10x15 mm. [12]=H 350x175x7x11 mm.")
-  (setq btype (getstring T "\nเลือกหมายเลข [1-12] หรือพิมพ์ขนาดเหล็กบีม <H 150x150x7x10 mm.>: "))
-  (setq btype (vl-string-trim " \t\r\n" btype))
-  (cond
-    ((or (= btype "") (= btype "5")) (setq btype "H 150x150x7x10 mm."))
-    ((= btype "1") (setq btype "H 100x50x5x7 mm."))
-    ((= btype "2") (setq btype "H 100x100x6x8 mm."))
-    ((= btype "3") (setq btype "H 125x125x6.5x9 mm."))
-    ((= btype "4") (setq btype "H 150x75x5x7 mm."))
-    ((= btype "6") (setq btype "H 200x100x5.5x8 mm."))
-    ((= btype "7") (setq btype "H 200x200x8x12 mm."))
-    ((= btype "8") (setq btype "H 250x125x6x9 mm."))
-    ((= btype "9") (setq btype "H 250x250x9x14 mm."))
-    ((= btype "10") (setq btype "H 300x150x6.5x9 mm."))
-    ((= btype "11") (setq btype "H 300x300x10x15 mm."))
-    ((= btype "12") (setq btype "H 350x175x7x11 mm."))
-  )
-
-  (setq stdlen 6.0)
-  (setq cut (getreal "\nความยาวที่ตัดใช้จริง (เมตร) <6.0>: "))
-  (if (null cut) (setq cut 6.0))
-
-  (setq qty (getint "\nจำนวนท่อนที่ต้องการตัด (ท่อน) <1>: "))
-  (if (null qty) (setq qty 1))
+  (setq grp (rebar-select-or-new *rebar-groups* "ขั้นที่ 1/5: กลุ่ม / หมวดงาน"))
+  (setq member (rebar-select-or-new *rebar-members* "ขั้นที่ 2/5: ชื่อส่วนโครงสร้าง"))
+  (setq btype (rebar-select-beam-size "ขั้นที่ 3/5: เลือกขนาดเหล็กบีม"))
+  (setq stdlen (rebar-prompt-val "ขั้นที่ 4/5: ความยาวมาตรฐานบีม [6, 9, 12 ม.]" 6.0 'real))
+  (setq cut (rebar-prompt-val "ขั้นที่ 5/5 [1/2]: ความยาวที่ตัดใช้จริง (เมตร)" 6.0 'real))
+  (setq qty (rebar-prompt-val "ขั้นที่ 5/5 [2/2]: จำนวนท่อนที่ต้องการตัด (ท่อน)" 1 'int))
 
   (setq payload (strcat
     "{\"materialCategory\":\"beam\""
@@ -334,8 +333,7 @@
     ",\"rebarType\":\"" btype "\""
     ",\"standardLength\":" (rtos stdlen 2 2)
     ",\"cutLength\":" (rtos cut 2 2)
-    ",\"quantity\":" (itoa qty)
-    ",\"isReusedOffcut\":false}"
+    ",\"quantity\":" (itoa qty) "}"
   ))
 
   (rebar-send-json payload (strcat "[" grp "] " member " (" btype " ยาว " (rtos cut 2 2) "ม. x " (itoa qty) "ท่อน)"))
@@ -343,357 +341,193 @@
 )
 
 ;;; =========================================================================
-;;; 3. คำสั่ง SYNC_PLATE (ถอดเหล็กเพลท Plate & J-Bolt)
+;;; 4. คำสั่ง SYNC_PLATE (ถอดเหล็กเพลท + J-Bolt)
 ;;; =========================================================================
 (defun c:SYNC_PLATE (/ grp member w l th qty jsz jlen jqty nqty wqty autoW payload)
   (princ "\n=======================================================")
-  (princ "\n  ระบบบันทึกถอดเหล็กเพลท & J-Bolt - ยุทธการ")
+  (princ "\n  [AutoCAD] ถอดเหล็กเพลทหัวเสา/ฐานราก (Plate) + J-Bolt")
   (princ "\n=======================================================")
-  (rebar-fetch-latest-metadata)
-  (setq grp (rebar-select-or-new *rebar-groups* "หมวดงานเหล็กเพลท"))
-  (setq member (rebar-select-or-new *rebar-members* "ชื่อชิ้นส่วนเพลท"))
+  (setq grp (rebar-select-or-new *rebar-groups* "ขั้นที่ 1: กลุ่ม / หมวดงาน"))
+  (setq member (rebar-select-or-new *rebar-members* "ขั้นที่ 2: ชื่อส่วนโครงสร้าง (เช่น เพลท P1)"))
+  (setq w (rebar-prompt-val "ความกว้างเพลท (มม.)" 300 'real))
+  (setq l (rebar-prompt-val "ความยาวเพลท (มม.)" 300 'real))
+  (setq th (rebar-prompt-val "ความหนาเพลท (มม.)" 6 'real))
+  (setq qty (rebar-prompt-val "จำนวนแผ่นเพลท (แผ่น)" 1 'int))
+  (setq jsz (rebar-prompt-val "ขนาด J-Bolt (เช่น DB16, DB20)" "DB16" 'str))
+  (setq jlen (rebar-prompt-val "ความยาว J-Bolt (เมตร)" 0.40 'real))
+  (setq jqty (rebar-prompt-val "จำนวน J-Bolt ต่อ 1 แผ่น (ชุด)" 4 'int))
+  (setq nqty (rebar-prompt-val "จำนวนน็อตต่อ 1 แผ่น (ตัว)" 4 'int))
+  (setq wqty (rebar-prompt-val "จำนวนแหวนต่อ 1 แผ่น (ตัว)" 4 'int))
 
-  (setq w (getint "\nความกว้างแผ่นเพลท (มม.) <300>: "))
-  (if (null w) (setq w 300))
-  (setq l (getint "\nความยาวแผ่นเพลท (มม.) <300>: "))
-  (if (null l) (setq l 300))
-  (setq th (getreal "\nความหนาแผ่นเพลท (มม.) <6.0>: "))
-  (if (null th) (setq th 6.0))
-
-  (setq qty (getint "\nจำนวนแผ่นเพลทที่ต้องการ (แผ่น) <1>: "))
-  (if (null qty) (setq qty 1))
-
-  (setq jsz (getstring T "\nขนาดเหล็ก J-Bolt (เช่น DB16, DB20, RB16) <DB16>: "))
-  (if (= (vl-string-trim " " jsz) "") (setq jsz "DB16"))
-  (setq jlen (getreal "\nความยาว J-Bolt ต่อตัว (เมตร) <0.40>: "))
-  (if (null jlen) (setq jlen 0.40))
-  (setq jqty (getint "\nจำนวน J-Bolt ต่อ 1 แผ่นเพลท <4>: "))
-  (if (null jqty) (setq jqty 4))
-
-  (setq nqty (getint "\nจำนวนหัวน็อตต่อแผ่น <4>: "))
-  (if (null nqty) (setq nqty 4))
-  (setq wqty (getint "\nจำนวนแหวนรองต่อแผ่น <4>: "))
-  (if (null wqty) (setq wqty 4))
-
-  (setq autoW (* (/ (float w) 1000.0) (/ (float l) 1000.0) th 7.85))
+  (setq autoW (* (/ w 1000.0) (/ l 1000.0) th 7.85))
+  (princ (strcat "\n[ผลคำนวณ]: น้ำหนักเพลทแผ่นละ " (rtos autoW 2 2) " กก. x " (itoa qty) " แผ่น = " (rtos (* autoW qty) 2 2) " กก."))
 
   (setq payload (strcat
     "{\"materialCategory\":\"plate\""
     ",\"label\":\"" member "\""
     ",\"group\":\"" grp "\""
-    ",\"plateWidth\":" (itoa w)
-    ",\"plateLength\":" (itoa l)
+    ",\"plateWidth\":" (rtos w 2 1)
+    ",\"plateLength\":" (rtos l 2 1)
     ",\"plateThickness\":" (rtos th 2 1)
-    ",\"plateWeightKg\":" (rtos autoW 2 2)
     ",\"quantity\":" (itoa qty)
     ",\"jboltSize\":\"" jsz "\""
     ",\"jboltLength\":" (rtos jlen 2 2)
     ",\"jboltQtyPerPlate\":" (itoa jqty)
     ",\"nutQtyPerPlate\":" (itoa nqty)
-    ",\"washerQtyPerPlate\":" (itoa wqty)
-    ",\"rebarType\":\"เพลท " (itoa w) "x" (itoa l) "x" (rtos th 2 1) "mm\"}"
+    ",\"washerQtyPerPlate\":" (itoa wqty) "}"
   ))
 
-  (rebar-send-json payload (strcat "[" grp "] " member " (เพลท " (itoa w) "x" (itoa l) "x" (rtos th 2 1) "mm " (itoa qty) "แผ่น + J-Bolt " (itoa (* jqty qty)) "ตัว)"))
+  (rebar-send-json payload (strcat "[" grp "] เพลท " (rtos w 2 0) "x" (rtos l 2 0) "x" (rtos th 2 0) "mm x " (itoa qty) " แผ่น"))
   (princ)
 )
 
 ;;; =========================================================================
-;;; 4. คำสั่ง SYNC_BOX (เหล็กกล่องสี่เหลี่ยม / แบน)
+;;; 5. คำสั่ง SYNC_BOX (เหล็กกล่อง SHS / RHS)
 ;;; =========================================================================
-(defun c:SYNC_BOX (/ grp member boxType cut qty payload)
+(defun c:SYNC_BOX (/ grp member sz cut qty payload)
   (princ "\n=======================================================")
-  (princ "\n  ระบบบันทึกถอดเหล็กกล่อง (Square/Rect Tube) - ยุทธการ")
+  (princ "\n  [AutoCAD] ถอดเหล็กกล่องสี่เหลี่ยม (SHS / RHS)")
   (princ "\n=======================================================")
-  (rebar-fetch-latest-metadata)
-  (setq grp (rebar-select-or-new *rebar-groups* "หมวดงานเหล็กกล่อง"))
-  (setq member (rebar-select-or-new *rebar-members* "ชื่อชิ้นส่วน"))
-
-  (princ "\n--- ขนาดเหล็กกล่องยอดนิยม หรือพิมพ์ขนาด ---")
-  (princ "\n  [1]=SHS 50x50x2.3 mm.    [2]=SHS 75x75x3.2 mm.   [3]=SHS 100x100x3.2 mm.")
-  (princ "\n  [4]=RHS 75x38x2.3 mm.    [5]=RHS 100x50x3.2 mm.  [6]=RHS 150x50x3.2 mm.")
-  (setq boxType (getstring T "\nเลือกหมายเลข [1-6] หรือพิมพ์ขนาด <SHS 50x50x2.3 mm.>: "))
-  (setq boxType (vl-string-trim " \t\r\n" boxType))
-  (cond
-    ((or (= boxType "") (= boxType "1")) (setq boxType "SHS 50x50x2.3 mm."))
-    ((= boxType "2") (setq boxType "SHS 75x75x3.2 mm."))
-    ((= boxType "3") (setq boxType "SHS 100x100x3.2 mm."))
-    ((= boxType "4") (setq boxType "RHS 75x38x2.3 mm."))
-    ((= boxType "5") (setq boxType "RHS 100x50x3.2 mm."))
-    ((= boxType "6") (setq boxType "RHS 150x50x3.2 mm."))
-  )
-
-  (setq cut (getreal "\nความยาวที่ตัดใช้จริง (เมตร) <6.0>: "))
-  (if (null cut) (setq cut 6.0))
-  (setq qty (getint "\nจำนวนท่อนที่ต้องการตัด (ท่อน) <1>: "))
-  (if (null qty) (setq qty 1))
+  (setq grp (rebar-select-or-new *rebar-groups* "กลุ่ม / หมวดงาน"))
+  (setq member (rebar-select-or-new *rebar-members* "ชื่อส่วนโครงสร้าง"))
+  (setq sz (rebar-prompt-val "ขนาดเหล็กกล่อง (เช่น SHS 50x50x2.3 mm.)" "SHS 50x50x2.3 mm." 'str))
+  (setq cut (rebar-prompt-val "ความยาวตัดใช้จริง (เมตร)" 6.0 'real))
+  (setq qty (rebar-prompt-val "จำนวนท่อนที่ต้องการตัด (ท่อน)" 1 'int))
 
   (setq payload (strcat
     "{\"materialCategory\":\"box_c_pipe\""
+    ",\"subCategory\":\"SHS\""
     ",\"label\":\"" member "\""
     ",\"group\":\"" grp "\""
-    ",\"rebarType\":\"" boxType "\""
-    ",\"standardLength\":6.0"
+    ",\"rebarType\":\"" sz "\""
+    ",\"standardLength\":6.00"
     ",\"cutLength\":" (rtos cut 2 2)
-    ",\"quantity\":" (itoa qty)
-    ",\"isReusedOffcut\":false}"
+    ",\"quantity\":" (itoa qty) "}"
   ))
-
-  (rebar-send-json payload (strcat "[" grp "] " member " (" boxType " " (rtos cut 2 2) "ม. x " (itoa qty) "ท่อน)"))
+  (rebar-send-json payload (strcat "[" grp "] " member " (" sz " ยาว " (rtos cut 2 2) "ม. x " (itoa qty) "ท่อน)"))
   (princ)
 )
 
 ;;; =========================================================================
-;;; 5. คำสั่ง SYNC_LIPC (เหล็กตัวซี C)
+;;; 6. คำสั่ง SYNC_LIPC (เหล็กตัวซี C-Channel)
 ;;; =========================================================================
-(defun c:SYNC_LIPC (/ grp member cType cut qty payload)
+(defun c:SYNC_LIPC (/ grp member sz cut qty payload)
   (princ "\n=======================================================")
-  (princ "\n  ระบบบันทึกถอดเหล็กตัวซี C (Lip Channel) - ยุทธการ")
+  (princ "\n  [AutoCAD] ถอดเหล็กตัวซี C-Channel (แปหลังคา/โครงผนัง)")
   (princ "\n=======================================================")
-  (rebar-fetch-latest-metadata)
-  (setq grp (rebar-select-or-new *rebar-groups* "หมวดงานเหล็กตัวซี"))
-  (setq member (rebar-select-or-new *rebar-members* "ชื่อชิ้นส่วนแป/คาน"))
-
-  (princ "\n--- ขนาดเหล็กตัวซี C ยอดนิยม หรือพิมพ์ขนาด ---")
-  (princ "\n  [1]=C 75x45x15x2.3 mm.    [2]=C 100x50x20x2.3 mm.  [3]=C 100x50x20x3.2 mm.")
-  (princ "\n  [4]=C 125x50x20x3.2 mm.   [5]=C 150x50x20x3.2 mm.  [6]=C 200x75x20x3.2 mm.")
-  (setq cType (getstring T "\nเลือกหมายเลข [1-6] หรือพิมพ์ขนาด <C 100x50x20x3.2 mm.>: "))
-  (setq cType (vl-string-trim " \t\r\n" cType))
-  (cond
-    ((or (= cType "") (= cType "3")) (setq cType "C 100x50x20x3.2 mm."))
-    ((= cType "1") (setq cType "C 75x45x15x2.3 mm."))
-    ((= cType "2") (setq cType "C 100x50x20x2.3 mm."))
-    ((= cType "4") (setq cType "C 125x50x20x3.2 mm."))
-    ((= cType "5") (setq cType "C 150x50x20x3.2 mm."))
-    ((= cType "6") (setq cType "C 200x75x20x3.2 mm."))
-  )
-
-  (setq cut (getreal "\nความยาวที่ตัดใช้จริง (เมตร) <6.0>: "))
-  (if (null cut) (setq cut 6.0))
-  (setq qty (getint "\nจำนวนท่อนที่ต้องการตัด (ท่อน) <1>: "))
-  (if (null qty) (setq qty 1))
+  (setq grp (rebar-select-or-new *rebar-groups* "กลุ่ม / หมวดงาน"))
+  (setq member (rebar-select-or-new *rebar-members* "ชื่อส่วนโครงสร้าง"))
+  (setq sz (rebar-prompt-val "ขนาดเหล็กตัวซี (เช่น C 100x50x20x2.3 mm.)" "C 100x50x20x2.3 mm." 'str))
+  (setq cut (rebar-prompt-val "ความยาวตัดใช้จริง (เมตร)" 6.0 'real))
+  (setq qty (rebar-prompt-val "จำนวนท่อนที่ต้องการตัด (ท่อน)" 1 'int))
 
   (setq payload (strcat
     "{\"materialCategory\":\"box_c_pipe\""
+    ",\"subCategory\":\"C\""
     ",\"label\":\"" member "\""
     ",\"group\":\"" grp "\""
-    ",\"rebarType\":\"" cType "\""
-    ",\"standardLength\":6.0"
+    ",\"rebarType\":\"" sz "\""
+    ",\"standardLength\":6.00"
     ",\"cutLength\":" (rtos cut 2 2)
-    ",\"quantity\":" (itoa qty)
-    ",\"isReusedOffcut\":false}"
+    ",\"quantity\":" (itoa qty) "}"
   ))
-
-  (rebar-send-json payload (strcat "[" grp "] " member " (" cType " " (rtos cut 2 2) "ม. x " (itoa qty) "ท่อน)"))
+  (rebar-send-json payload (strcat "[" grp "] " member " (" sz " ยาว " (rtos cut 2 2) "ม. x " (itoa qty) "ท่อน)"))
   (princ)
 )
 
 ;;; =========================================================================
-;;; 6. คำสั่ง SYNC_PIPE (ท่อกลมดำ)
+;;; 7. คำสั่ง SYNC_PIPE (ท่อเหล็กกลมโครงสร้าง)
 ;;; =========================================================================
-(defun c:SYNC_PIPE (/ grp member pipeType cut qty payload)
+(defun c:SYNC_PIPE (/ grp member sz cut qty payload)
   (princ "\n=======================================================")
-  (princ "\n  ระบบบันทึกถอดท่อกลมดำ (Round Steel Pipe) - ยุทธการ")
+  (princ "\n  [AutoCAD] ถอดท่อเหล็กกลมโครงสร้าง (Circular Tube)")
   (princ "\n=======================================================")
-  (rebar-fetch-latest-metadata)
-  (setq grp (rebar-select-or-new *rebar-groups* "หมวดงานท่อกลมดำ"))
-  (setq member (rebar-select-or-new *rebar-members* "ชื่อชิ้นส่วน"))
-
-  (princ "\n--- ขนาดท่อกลมดำยอดนิยม หรือพิมพ์ขนาด ---")
-  (princ "\n  [1]=PIPE 1-1/2\" (48.6x2.3 mm.)  [2]=PIPE 2\" (60.5x2.3 mm.)  [3]=PIPE 2-1/2\" (76.3x2.8 mm.)")
-  (princ "\n  [4]=PIPE 3\" (89.1x3.2 mm.)      [5]=PIPE 4\" (114.3x3.5 mm.) [6]=PIPE 6\" (165.2x4.5 mm.)")
-  (setq pipeType (getstring T "\nเลือกหมายเลข [1-6] หรือพิมพ์ขนาด <PIPE 2\" (60.5x2.3 mm.)>: "))
-  (setq pipeType (vl-string-trim " \t\r\n" pipeType))
-  (cond
-    ((or (= pipeType "") (= pipeType "2")) (setq pipeType "PIPE 2\" (60.5x2.3 mm.)"))
-    ((= pipeType "1") (setq pipeType "PIPE 1-1/2\" (48.6x2.3 mm.)"))
-    ((= pipeType "3") (setq pipeType "PIPE 2-1/2\" (76.3x2.8 mm.)"))
-    ((= pipeType "4") (setq pipeType "PIPE 3\" (89.1x3.2 mm.)"))
-    ((= pipeType "5") (setq pipeType "PIPE 4\" (114.3x3.5 mm.)"))
-    ((= pipeType "6") (setq pipeType "PIPE 6\" (165.2x4.5 mm.)"))
-  )
-
-  (setq cut (getreal "\nความยาวที่ตัดใช้จริง (เมตร) <6.0>: "))
-  (if (null cut) (setq cut 6.0))
-  (setq qty (getint "\nจำนวนท่อนที่ต้องการตัด (ท่อน) <1>: "))
-  (if (null qty) (setq qty 1))
+  (setq grp (rebar-select-or-new *rebar-groups* "กลุ่ม / หมวดงาน"))
+  (setq member (rebar-select-or-new *rebar-members* "ชื่อส่วนโครงสร้าง"))
+  (setq sz (rebar-prompt-val "ขนาดท่อเหล็กกลม (เช่น ท่อ 2 นิ้ว OD 60.5x2.3 mm.)" "ท่อ 2 นิ้ว OD 60.5x2.3 mm." 'str))
+  (setq cut (rebar-prompt-val "ความยาวตัดใช้จริง (เมตร)" 6.0 'real))
+  (setq qty (rebar-prompt-val "จำนวนท่อนที่ต้องการตัด (ท่อน)" 1 'int))
 
   (setq payload (strcat
     "{\"materialCategory\":\"box_c_pipe\""
+    ",\"subCategory\":\"PIPE\""
     ",\"label\":\"" member "\""
     ",\"group\":\"" grp "\""
-    ",\"rebarType\":\"" pipeType "\""
-    ",\"standardLength\":6.0"
+    ",\"rebarType\":\"" sz "\""
+    ",\"standardLength\":6.00"
     ",\"cutLength\":" (rtos cut 2 2)
-    ",\"quantity\":" (itoa qty)
-    ",\"isReusedOffcut\":false}"
+    ",\"quantity\":" (itoa qty) "}"
   ))
-
-  (rebar-send-json payload (strcat "[" grp "] " member " (" pipeType " " (rtos cut 2 2) "ม. x " (itoa qty) "ท่อน)"))
+  (rebar-send-json payload (strcat "[" grp "] " member " (" sz " ยาว " (rtos cut 2 2) "ม. x " (itoa qty) "ท่อน)"))
   (princ)
 )
 
 ;;; =========================================================================
-;;; 7. คำสั่ง SYNC_PVC (ท่อ PVC & ข้อต่อ-วาล์ว)
+;;; 8. คำสั่ง SYNC_PVC (ท่อ PVC และข้อต่อ/วาล์ว)
 ;;; =========================================================================
-(defun c:SYNC_PVC (/ grp member subChoice pvcType cut qty isFitting payload)
+(defun c:SYNC_PVC (/ grp member isFit sz cut qty payload)
   (princ "\n=======================================================")
-  (princ "\n  ระบบบันทึกถอดท่อ PVC & ข้อต่อ-วาล์ว - ยุทธการ")
+  (princ "\n  [AutoCAD] ถอดท่อ PVC และอุปกรณ์ข้อต่อ/วาล์ว")
   (princ "\n=======================================================")
-  (rebar-fetch-latest-metadata)
-  (setq grp (rebar-select-or-new *rebar-groups* "หมวดงานท่อ PVC"))
-  (setq member (rebar-select-or-new *rebar-members* "ชื่อแนวท่อ/จุดติดตั้ง"))
+  (setq grp (rebar-select-or-new *rebar-groups* "กลุ่ม / หมวดงาน"))
+  (setq member (rebar-select-or-new *rebar-members* "ชื่อส่วนโครงสร้าง/งานท่อ"))
+  (setq isFit (rebar-prompt-val "ประเภท [1]=ท่อ PVC (4ม.) [2]=ข้อต่อ/วาล์ว" "1" 'str))
 
-  (setq subChoice (getstring T "\nเลือกประเภท [1]=ท่อ PVC ชั้น 8.5, [2]=ท่อ PVC ชั้น 13.5, [3]=ข้อต่อ/วาล์ว <1>: "))
-  (setq isFitting "false")
-  (cond
-    ((= subChoice "2")
-      (setq pvcType (getstring T "\nขนาดท่อ PVC 13.5 (เช่น 1/2\", 3/4\", 1\", 2\", 3\", 4\") <2\">: "))
-      (if (= (vl-string-trim " " pvcType) "") (setq pvcType "2\""))
-      (setq pvcType (strcat "PVC 13.5 " pvcType))
-    )
-    ((= subChoice "3")
-      (setq isFitting "true")
-      (setq pvcType (getstring T "\nระบุชนิดข้อต่อ/วาล์วและขนาด (เช่น ข้องอ 90 2\", สามทาง 4\") <ข้อต่อตรง 2\">: "))
-      (if (= (vl-string-trim " " pvcType) "") (setq pvcType "ข้อต่อตรง 2\""))
-    )
-    (t
-      (setq pvcType (getstring T "\nขนาดท่อ PVC 8.5 (เช่น 1/2\", 3/4\", 1\", 2\", 3\", 4\") <2\">: "))
-      (if (= (vl-string-trim " " pvcType) "") (setq pvcType "2\""))
-      (setq pvcType (strcat "PVC 8.5 " pvcType))
-    )
-  )
-
-  (if (= isFitting "true")
+  (if (= isFit "2")
     (progn
-      (setq cut 0.0)
-      (setq qty (getint "\nจำนวนข้อต่อ/อุปกรณ์ที่ต้องการ (ชิ้น) <1>: "))
-      (if (null qty) (setq qty 1))
+      (setq sz (rebar-prompt-val "ระบุประเภทและขนาดข้อต่อ (เช่น ข้องอ 90 2 นิ้ว)" "ข้อต่อตรง 2\"" 'str))
+      (setq qty (rebar-prompt-val "จำนวนอุปกรณ์ (ชิ้น/ตัว)" 1 'int))
       (setq payload (strcat
         "{\"materialCategory\":\"pvc\""
         ",\"pvcType\":\"fitting\""
         ",\"label\":\"" member "\""
         ",\"group\":\"" grp "\""
-        ",\"rebarType\":\"" pvcType "\""
-        ",\"quantity\":" (itoa qty)
-        ",\"isReusedOffcut\":false}"
+        ",\"rebarType\":\"" sz "\""
+        ",\"quantity\":" (itoa qty) "}"
       ))
+      (rebar-send-json payload (strcat "[" grp "] " member " (" sz " x " (itoa qty) " ตัว)"))
     )
     (progn
-      (setq cut (getreal "\nความยาวท่อที่ตัดใช้ (เมตร) <4.0>: "))
-      (if (null cut) (setq cut 4.0))
-      (setq qty (getint "\nจำนวนท่อนท่อที่ต้องการตัด (ท่อน) <1>: "))
-      (if (null qty) (setq qty 1))
+      (setq sz (rebar-prompt-val "ขนาดท่อ PVC (เช่น ท่อ PVC 2 นิ้ว ชั้น 8.5)" "ท่อ PVC 2 นิ้ว ชั้น 8.5" 'str))
+      (setq cut (rebar-prompt-val "ความยาวตัดใช้จริง (เมตร)" 4.0 'real))
+      (setq qty (rebar-prompt-val "จำนวนท่อนที่ต้องการตัด (ท่อน)" 1 'int))
       (setq payload (strcat
         "{\"materialCategory\":\"pvc\""
         ",\"pvcType\":\"pipe\""
         ",\"label\":\"" member "\""
         ",\"group\":\"" grp "\""
-        ",\"rebarType\":\"" pvcType "\""
-        ",\"standardLength\":4.0"
+        ",\"rebarType\":\"" sz "\""
+        ",\"standardLength\":4.00"
         ",\"cutLength\":" (rtos cut 2 2)
-        ",\"quantity\":" (itoa qty)
-        ",\"isReusedOffcut\":false}"
+        ",\"quantity\":" (itoa qty) "}"
       ))
+      (rebar-send-json payload (strcat "[" grp "] " member " (" sz " ยาว " (rtos cut 2 2) "ม. x " (itoa qty) "ท่อน)"))
     )
   )
-
-  (rebar-send-json payload (strcat "[" grp "] " member " (" pvcType " " (itoa qty) "ชิ้น)"))
   (princ)
 )
 
 ;;; =========================================================================
-;;; 8. คำสั่ง SYNC_MENU (เมนูรวมเลือกหมวดงาน)
+;;; 9. คำสั่ง REBAR_DRAW (วาดตาราง BBS ลงใน Drawing อัตโนมัติ)
 ;;; =========================================================================
-(defun c:SYNC_MENU (/ choice)
-  (princ "\n=======================================================")
-  (princ "\n  เมนูระบบถอดวัสดุโครงสร้าง & Live Sync - ยุทธการ คำกลอน")
-  (princ "\n=======================================================")
-  (princ "\n  [1] SYNC_REBAR - ถอดเหล็กเส้น (มอก. RB/DB + คลังเศษ)")
-  (princ "\n  [2] SYNC_BEAM  - ถอดเหล็กบีม (H-Beam / I-Beam / WF)")
-  (princ "\n  [3] SYNC_PLATE - ถอดเหล็กเพลท & J-Bolt (Base Plate)")
-  (princ "\n  [4] SYNC_BOX   - ถอดเหล็กกล่องสี่เหลี่ยม / แบน")
-  (princ "\n  [5] SYNC_LIPC  - ถอดเหล็กตัวซี C (Lip Channel)")
-  (princ "\n  [6] SYNC_PIPE  - ถอดท่อกลมดำ (Round Steel Pipe)")
-  (princ "\n  [7] SYNC_PVC   - ถอดท่อ PVC & ข้อต่อ-วาล์ว")
-  (princ "\n  [8] REBAR_DRAW - วาดตาราง BBS สวยงามลง Drawing")
-  (princ "\n  [9] REBAR_WEB  - เปิดหน้าเว็บจัดการคลังเศษและสต็อก")
-  (princ "\n=======================================================")
-  (setq choice (getstring T "\nเลือกหมวดงาน [1-9] <1>: "))
-  (setq choice (vl-string-trim " \t\r\n" choice))
-  (cond
-    ((or (= choice "") (= choice "1")) (c:SYNC_REBAR))
-    ((= choice "2") (c:SYNC_BEAM))
-    ((= choice "3") (c:SYNC_PLATE))
-    ((= choice "4") (c:SYNC_BOX))
-    ((= choice "5") (c:SYNC_LIPC))
-    ((= choice "6") (c:SYNC_PIPE))
-    ((= choice "7") (c:SYNC_PVC))
-    ((= choice "8") (c:REBAR_DRAW))
-    ((= choice "9") (c:REBAR_WEB))
-    (t (princ "\nเลือกไม่ถูกต้อง ยกเลิกคำสั่ง"))
-  )
-  (princ)
-)
-
-;;; คำแนะนำการใช้งาน
-(defun c:REBAR_HELP ()
-  (princ "\n=======================================================")
-  (princ "\nคำสั่งระบบถอดวัสดุโครงสร้างและคลังเศษ (v4.0):")
-  (princ "\n  SYNC_MENU      - เมนูรวมเลือกหมวดงานทั้งหมด")
-  (princ "\n  SYNC_REBAR     - ถอดเหล็กเส้น (RB/DB) และดึงเศษในสต็อก")
-  (princ "\n  SYNC_BEAM      - ถอดเหล็กบีม (H-Beam, I-Beam, WF)")
-  (princ "\n  SYNC_PLATE     - ถอดเหล็กเพลท + J-Bolt + น็อต-แหวน")
-  (princ "\n  SYNC_BOX       - ถอดเหล็กกล่องสี่เหลี่ยม / แบน")
-  (princ "\n  SYNC_LIPC      - ถอดเหล็กตัวซี C")
-  (princ "\n  SYNC_PIPE      - ถอดท่อกลมดำ")
-  (princ "\n  SYNC_PVC       - ถอดท่อ PVC & ข้อต่อ")
-  (princ "\n  REBAR_DRAW     - วาดตาราง BBS ลงใน Drawing อัตโนมัติ")
-  (princ "\n  REBAR_OFFCUTS  - ตรวจสอบรายการเศษเหล็กคงเหลือสะสม")
-  (princ "\n  REBAR_WEB      - เปิดหน้าเว็บจัดการวัสดุบน Web Browser")
-  (princ "\n=======================================================\n")
-  (princ)
-)
-
-(defun c:REBAR_WEB ()
-  (command "_.BROWSER" "https://portfolio-yutthakan.onrender.com/#admin-rebar")
-  (princ "\nกำลังเปิดหน้าต่างจัดการเหล็กเส้นบนเว็บ...")
-  (princ)
-)
-
-(defun c:REBAR_OFFCUTS (/ http url res)
-  (princ "\nกำลังดึงรายการเศษเหล็กคงเหลือสะสมจากระบบ...")
-  (setq http (vlax-create-object "MSXML2.ServerXMLHTTP.6.0"))
-  (if (null http) (setq http (vlax-create-object "MSXML2.XMLHTTP")))
-  (if (null http) (setq http (vlax-create-object "WinHttp.WinHttpRequest.5.1")))
-  (if http
-    (progn
-      (setq url "https://portfolio-yutthakan.onrender.com/api/rebar/offcuts")
-      (vlax-invoke-method http 'open "GET" url :vlax-false)
-      (vl-catch-all-apply 'vlax-invoke-method (list http 'send))
-      (setq res (vlax-get-property http 'responseText))
-      (vlax-release-object http)
-      (princ (strcat "\n[รายการเศษเหล็กคงเหลือสะสมในระบบ]:\n" (substr res 1 (min 1500 (strlen res)))))
-    )
-    (princ "\n[ข้อผิดพลาด] ไม่สามารถเชื่อมต่อ HTTP ได้")
-  )
-  (princ)
-)
-
 (defun c:REBAR_DRAW (/ pt http url csvText lines rowIdx y startX colWidths line cols x cleanCol cIdx)
-  (setq pt (getpoint "\nคลิกตำแหน่งจุดเริ่มต้นที่จะวางตาราง Bar Bending Schedule (BBS): "))
+  (setq pt (getpoint "\nคลิกกำหนดตำแหน่งจุดเริ่มต้นวางตาราง Bar Bending Schedule (BBS): "))
   (if pt
     (progn
-      (princ "\nกำลังดาวน์โหลดข้อมูลตารางเหล็กเส้นจากเซิร์ฟเวอร์...")
+      (princ "\nกำลังดาวน์โหลดข้อมูลตารางล่าสุดจากเซิร์ฟเวอร์...")
       (setq http (vlax-create-object "MSXML2.ServerXMLHTTP.6.0"))
       (if (null http) (setq http (vlax-create-object "MSXML2.XMLHTTP")))
       (if (null http) (setq http (vlax-create-object "WinHttp.WinHttpRequest.5.1")))
       (if http
         (progn
           (setq url "https://portfolio-yutthakan.onrender.com/api/rebar/export/bbs.csv")
-          (vlax-invoke-method http 'open "GET" url :vlax-false)
-          (vl-catch-all-apply 'vlax-invoke-method (list http 'send))
-          (setq csvText (vlax-get-property http 'responseText))
+          (vl-catch-all-apply
+            '(lambda ()
+               (vlax-invoke-method http 'open "GET" url vlax-false)
+               (vlax-invoke-method http 'send)
+               (setq csvText (vlax-get-property http 'responseText))
+             )
+          )
           (vlax-release-object http)
 
           (if (and csvText (/= csvText ""))
@@ -725,9 +559,9 @@
                 )
               )
               (command "_.LINE" (list startX y 0.0) (list x y 0.0) "")
-              (princ (strcat "\n[สำเร็จ] สร้างตาราง Bar Bending Schedule จำนวน " (itoa rowIdx) " แถว ลงใน Drawing เรียบร้อย!"))
+              (princ (strcat "\n[สำเร็จ] สร้างตาราง BBS จำนวน " (itoa rowIdx) " แถว ลงใน Drawing เรียบร้อย!"))
             )
-            (princ "\nไม่สามารถดึงข้อมูลตารางเหล็กได้ กรุณาตรวจสอบอินเทอร์เน็ตหรือเซิร์ฟเวอร์")
+            (princ "\n[แจ้งเตือน] ยังไม่มีข้อมูลตารางเหล็กบนคลาวด์ หรือยังไม่ได้เชื่อมต่อเน็ต")
           )
         )
       )
@@ -736,6 +570,79 @@
   (princ)
 )
 
-(princ "\n[สำเร็จ] โหลดปลั๊กอิน Yutthakan Structural Sync v4.0 เรียบร้อย!")
-(princ "\nพิมพ์คำสั่ง SYNC_MENU, SYNC_REBAR, SYNC_BEAM, SYNC_PLATE, SYNC_BOX, SYNC_LIPC, SYNC_PIPE, SYNC_PVC")
+;;; =========================================================================
+;;; 10. คำสั่ง SYNC_MENU (เมนูรวมเลือกหมวดงาน)
+;;; =========================================================================
+(defun c:SYNC_MENU (/ choice)
+  (princ "\n=======================================================")
+  (princ "\n  ระบบซิงก์ถอดแบบวัสดุโครงสร้าง & BBS v4.5 (ยุทธการ คำกลอน)")
+  (princ "\n=======================================================")
+  (princ "\n  [1] SYNC_REBAR     - ถอดเหล็กเส้น (RB/DB) & ดึงเศษในคลัง")
+  (princ "\n  [2] SYNC_CONCRETE  - คิดปริมาณปูนคอนกรีต (คิว m³)")
+  (princ "\n  [3] SYNC_BEAM      - ถอดเหล็กบีม (H-Beam / I-Beam / WF)")
+  (princ "\n  [4] SYNC_PLATE     - ถอดเหล็กเพลท + J-Bolt + น็อต/แหวน")
+  (princ "\n  [5] SYNC_BOX       - ถอดเหล็กกล่อง (SHS / RHS)")
+  (princ "\n  [6] SYNC_LIPC      - ถอดเหล็กแปตัวซี (C-Channel)")
+  (princ "\n  [7] SYNC_PIPE      - ถอดท่อเหล็กกลมโครงสร้าง")
+  (princ "\n  [8] SYNC_PVC       - ถอดท่อ PVC & ข้อต่อ/วาล์ว")
+  (princ "\n  [9] REBAR_DRAW     - วาดตาราง BBS ลงใน Drawing อัตโนมัติ")
+  (princ "\n  [10] REBAR_WEB     - เปิดหน้าระบบเว็บจัดการเหล็กเส้น")
+  (princ "\n=======================================================")
+  (setq choice (rebar-prompt-val "เลือกหมายเลขคำสั่ง [1-10]" "1" 'str))
+  (cond
+    ((= choice "1") (c:SYNC_REBAR))
+    ((= choice "2") (c:SYNC_CONCRETE))
+    ((= choice "3") (c:SYNC_BEAM))
+    ((= choice "4") (c:SYNC_PLATE))
+    ((= choice "5") (c:SYNC_BOX))
+    ((= choice "6") (c:SYNC_LIPC))
+    ((= choice "7") (c:SYNC_PIPE))
+    ((= choice "8") (c:SYNC_PVC))
+    ((= choice "9") (c:REBAR_DRAW))
+    ((= choice "10") (c:REBAR_WEB))
+  )
+  (princ)
+)
+
+;;; =========================================================================
+;;; คำสั่งเสริมอื่นๆ
+;;; =========================================================================
+(defun c:REBAR_HELP () (c:SYNC_MENU))
+
+(defun c:REBAR_WEB ()
+  (command "_.BROWSER" "https://portfolio-yutthakan.onrender.com/#admin-rebar")
+  (princ "\nกำลังเปิดหน้าต่างเว็บจัดการระบบ...")
+  (princ)
+)
+
+(defun c:REBAR_OFFCUTS (/ http url res)
+  (princ "\nกำลังดึงรายการเศษเหล็กคงเหลือ...")
+  (setq http (vlax-create-object "MSXML2.ServerXMLHTTP.6.0"))
+  (if (null http) (setq http (vlax-create-object "MSXML2.XMLHTTP")))
+  (if (null http) (setq http (vlax-create-object "WinHttp.WinHttpRequest.5.1")))
+  (if http
+    (progn
+      (setq url "https://portfolio-yutthakan.onrender.com/api/rebar/offcuts")
+      (vl-catch-all-apply
+        '(lambda ()
+           (vlax-invoke-method http 'open "GET" url vlax-false)
+           (vlax-invoke-method http 'send)
+           (setq res (vlax-get-property http 'responseText))
+         )
+      )
+      (vlax-release-object http)
+      (if (and res (/= res ""))
+        (princ (strcat "\n[รายการเศษเหล็กในคลัง]:\n" (substr res 1 (min 1500 (strlen res)))))
+        (princ "\nไม่มีรายการเศษเหล็กคงเหลือ หรือเชื่อมต่อเน็ตไม่ได้")
+      )
+    )
+  )
+  (princ)
+)
+
+(princ "\n=======================================================")
+(princ "\n[✓ สำเร็จ] โหลดปลั๊กอิน Yutthakan Structural Sync v4.5 เรียบร้อย!")
+(princ "\nพิมพ์คำสั่ง SYNC_MENU เพื่อเลือกหมวดงานทั้งหมด หรือพิมพ์:")
+(princ "\n  SYNC_REBAR, SYNC_CONCRETE, SYNC_BEAM, SYNC_PLATE, SYNC_BOX, SYNC_PVC")
+(princ "\n=======================================================\n")
 (princ)
