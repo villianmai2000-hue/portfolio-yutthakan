@@ -1,3 +1,9 @@
+import { 
+  UNIT_WEIGHT_LOOKUP, getUnitWeight,
+  REBAR_STANDARDS, H_BEAM_STANDARDS, I_BEAM_STANDARDS, WF_STANDARDS,
+  BOX_STANDARDS, C_CHANNEL_STANDARDS, ROUND_PIPE_STANDARDS,
+  PVC_85_STANDARDS, PVC_135_STANDARDS, PVC_FITTING_TYPES, PVC_PIPE_SIZES
+} from './steelStandards.js';
 import { MongoClient } from 'mongodb';
 import fs from 'fs';
 import path from 'path';
@@ -424,15 +430,106 @@ export const DEFAULT_REBAR_OFFCUTS = [
 
 // ฟังก์ชันคำนวณถอดเหล็กเส้นและเศษตัด (BBS Calculation)
 export function calculateRebarMetrics(data) {
-  const standardLength = Number(data.standardLength) || 12.00;
-  const cutLength = Number(data.cutLength) || 6.00;
+  const materialCategory = data.materialCategory || data.categoryType || 'rebar'; // 'rebar' | 'beam' | 'plate' | 'box_c_pipe' | 'pvc'
+  const standardLength = Number(data.standardLength) || (materialCategory === 'pvc' ? 4.00 : (materialCategory === 'box_c_pipe' ? 6.00 : 12.00));
+  const cutLength = Number(data.cutLength) || standardLength;
   const quantity = Math.max(1, parseInt(data.quantity) || 1);
-  const rebarType = (data.rebarType || data.barType || 'DB20').toUpperCase().trim();
-  const weightPerMeter = REBAR_UNIT_WEIGHTS[rebarType] || 2.47;
+  const rebarType = (data.rebarType || data.barType || 'DB20').trim();
   const label = data.label || data.member || 'ชิ้นส่วนโครงสร้าง';
   const group = data.group || data.category || 'งานโครงสร้างทั่วไป';
   const isReused = Boolean(data.isReusedOffcut || data.reusedOffcutId);
 
+  // 1. กรณีหมวดงาน: เหล็กเพลท (Steel Plate)
+  if (materialCategory === 'plate') {
+    const plateWidth = Number(data.plateWidth) || 300; // mm
+    const plateLength = Number(data.plateLength) || 300; // mm
+    const plateThickness = Number(data.plateThickness) || 6; // mm
+    const autoPlateWeight = Number(((plateWidth / 1000) * (plateLength / 1000) * plateThickness * 7.85).toFixed(2));
+    const plateWeightKg = Number(data.plateWeightKg) || autoPlateWeight;
+    const totalPlateWeightKg = Number((plateWeightKg * quantity).toFixed(2));
+
+    const jboltSize = data.jboltSize || 'DB16';
+    const jboltLength = Number(data.jboltLength) || 0.40;
+    const jboltQtyPerPlate = parseInt(data.jboltQtyPerPlate) || 4;
+    const totalJBolts = jboltQtyPerPlate * quantity;
+    const jboltUnitWeight = getUnitWeight(jboltSize) || 1.58;
+    const totalJBoltWeightKg = Number((totalJBolts * jboltLength * jboltUnitWeight).toFixed(2));
+
+    const nutQtyPerPlate = parseInt(data.nutQtyPerPlate) || 4;
+    const totalNuts = nutQtyPerPlate * quantity;
+
+    const washerQtyPerPlate = parseInt(data.washerQtyPerPlate) || 4;
+    const totalWashers = washerQtyPerPlate * quantity;
+
+    const totalWeightKg = Number((totalPlateWeightKg + totalJBoltWeightKg).toFixed(2));
+
+    return {
+      ...data,
+      id: data.id || `plate-${Date.now()}`,
+      materialCategory: 'plate',
+      label,
+      member: label,
+      group,
+      category: group,
+      rebarType: `เพลท ${plateWidth}x${plateLength}x${plateThickness}mm`,
+      barType: `เพลท ${plateWidth}x${plateLength}x${plateThickness}mm`,
+      plateWidth,
+      plateLength,
+      plateThickness,
+      plateWeightKg,
+      totalPlateWeightKg,
+      weightKg: totalWeightKg,
+      totalWeightKg,
+      quantity,
+      jboltSize,
+      jboltLength,
+      jboltQtyPerPlate,
+      totalJBolts,
+      totalJBoltWeightKg,
+      nutQtyPerPlate,
+      totalNuts,
+      washerQtyPerPlate,
+      totalWashers,
+      standardBarsNeeded: 0,
+      barsNeeded: 0,
+      totalCutLength: 0,
+      totalOffcutLength: 0,
+      offcutPerBar: 0,
+      scrapPercent: 0
+    };
+  }
+
+  // 2. กรณีหมวดงาน: ท่อ PVC ข้อต่อและวาล์ว (Fittings & Valves)
+  if (materialCategory === 'pvc' && (data.pvcType === 'fitting' || data.pvcType === 'valve')) {
+    const fittingName = data.fittingName || data.rebarType || 'ข้อต่อตรง';
+    const fittingSize = data.fittingSize || '2"';
+    return {
+      ...data,
+      id: data.id || `pvc-fit-${Date.now()}`,
+      materialCategory: 'pvc',
+      pvcType: data.pvcType,
+      label,
+      member: label,
+      group,
+      category: group,
+      rebarType: `${fittingName} ${fittingSize}`,
+      barType: `${fittingName} ${fittingSize}`,
+      fittingName,
+      fittingSize,
+      quantity,
+      weightKg: 0,
+      totalWeightKg: 0,
+      standardBarsNeeded: 0,
+      barsNeeded: 0,
+      totalCutLength: 0,
+      totalOffcutLength: 0,
+      offcutPerBar: 0,
+      scrapPercent: 0
+    };
+  }
+
+  // 3. หมวดงานที่ตัดเป็นความยาวเชิงเส้น (เหล็กเส้น, เหล็กบีม, เหล็กกล่อง, ตัวซี, ท่อกลม, ท่อ PVC เส้นตรง)
+  const weightPerMeter = Number(data.unitWeight) || getUnitWeight(rebarType, 2.47);
   let piecesPerStandardBar = Math.max(1, Math.floor(standardLength / cutLength));
   let barsNeeded = 0;
   let totalCutLength = Number((cutLength * quantity).toFixed(2));
@@ -442,7 +539,6 @@ export function calculateRebarMetrics(data) {
   let offcutPerBar = 0;
 
   if (isReused) {
-    // นำเศษเหล็กกลับมาใช้ ไม่ต้องเบิกเส้นใหม่ 12m
     barsNeeded = 0;
     piecesPerStandardBar = 1;
     const initialOffcutLen = Number(data.offcutInitialLength) || cutLength;
@@ -455,8 +551,6 @@ export function calculateRebarMetrics(data) {
     totalMaterialLength = Number((barsNeeded * standardLength).toFixed(2));
     totalOffcutLength = Number(Math.max(0, totalMaterialLength - totalCutLength).toFixed(2));
     wastePercent = totalMaterialLength > 0 ? Number(((totalOffcutLength / totalMaterialLength) * 100).toFixed(1)) : 0;
-    
-    // คำนวณเศษที่แท้จริง เช่น DB20 ตัด 6.0m 1 ท่อน จากเส้น 12m -> เศษเหลือ 6.0m!
     if (barsNeeded === 1) {
       offcutPerBar = totalOffcutLength;
     } else {
@@ -469,7 +563,8 @@ export function calculateRebarMetrics(data) {
 
   return {
     ...data,
-    id: data.id || `rebar-${Date.now()}`,
+    id: data.id || `item-${Date.now()}`,
+    materialCategory,
     label,
     member: label,
     group,
@@ -486,132 +581,18 @@ export function calculateRebarMetrics(data) {
     offcutPerBar,
     totalCutLength,
     totalMaterialLength,
-    totalStandardLength: totalMaterialLength,
     totalOffcutLength,
     totalScrapLength: totalOffcutLength,
-    scrapPercent: wastePercent,
-    wastePercent,
-    weightPerMeter,
     unitWeight: weightPerMeter,
+    weightPerMeter,
     weightKg,
     totalWeightKg: weightKg,
     totalOrderWeightKg,
-    isReusedOffcut: isReused,
-    reusedOffcutId: data.reusedOffcutId || null,
-    usedFor: data.usedFor || '',
-    note: data.note || data.notes || '',
-    notes: data.note || data.notes || '',
-    updatedAt: new Date().toISOString()
+    scrapPercent: wastePercent,
+    wastePercent
   };
 }
 
-// ช่วยอ่าน/เขียนไฟล์ JSON ในเครื่อง
-function getFilePath(collection) {
-  return path.join(DATA_DIR, `${collection}.json`);
-}
-
-function readLocalJson(collection, fallback = []) {
-  const filePath = getFilePath(collection);
-  if (!fs.existsSync(filePath)) {
-    writeLocalJson(collection, fallback);
-    return fallback;
-  }
-  try {
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    return JSON.parse(raw);
-  } catch (err) {
-    return fallback;
-  }
-}
-
-function writeLocalJson(collection, data) {
-  const filePath = getFilePath(collection);
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-}
-
-// ฟังก์ชันเชื่อมต่อ MongoDB Atlas
-export async function connectDB() {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) return null;
-
-  if (db) return db;
-
-  try {
-    if (!client) {
-      client = new MongoClient(uri, {
-        serverSelectionTimeoutMS: 8000,
-        connectTimeoutMS: 10000,
-      });
-      await client.connect();
-      console.log('⚡ Connected to MongoDB Atlas Cloud Database');
-    }
-    db = client.db(process.env.DB_NAME || 'yutthakan_portfolio');
-    await initAtlasData(db);
-    return db;
-  } catch (err) {
-    console.warn('⚠️ MongoDB Atlas connection error, running in Local JSON fallback mode:', err.message);
-    db = null;
-    return null;
-  }
-}
-
-// ฟังก์ชันเตรียมข้อมูลเริ่มต้นใน MongoDB Atlas
-async function initAtlasData(database) {
-  try {
-    const usersCol = database.collection('users');
-    const owner = await usersCol.findOne({ username: DEFAULT_OWNER.username });
-    if (!owner) {
-      const hashedPassword = await bcrypt.hash(DEFAULT_OWNER.passwordPlain, 10);
-      await usersCol.insertOne({
-        ...DEFAULT_OWNER,
-        password: hashedPassword,
-        createdAt: new Date()
-      });
-      console.log('✅ Seeded default admin user in MongoDB Atlas');
-    }
-
-    const profileCol = database.collection('profile');
-    const profile = await profileCol.findOne({ id: 'main_profile' });
-    if (!profile) {
-      await profileCol.insertOne({
-        id: 'main_profile',
-        ...DEFAULT_OWNER,
-        createdAt: new Date()
-      });
-    }
-
-    const projectsCol = database.collection('projects');
-    const count = await projectsCol.countDocuments();
-    if (count === 0) {
-      await projectsCol.insertMany(DEFAULT_PROJECTS);
-      console.log('✅ Seeded demo projects in MongoDB Atlas');
-    }
-
-    const siteLogsCol = database.collection('site_logs');
-    const logCount = await siteLogsCol.countDocuments();
-    if (logCount === 0) {
-      await siteLogsCol.insertMany(DEFAULT_SITE_LOGS);
-    }
-
-    const rebarCol = database.collection('rebar_items');
-    const rebarCount = await rebarCol.countDocuments();
-    if (rebarCount === 0) {
-      await rebarCol.insertMany(DEFAULT_REBAR_ITEMS);
-      console.log('✅ Seeded demo rebar BBS items in MongoDB Atlas');
-    }
-
-    const offcutsCol = database.collection('rebar_offcuts');
-    const offcutsCount = await offcutsCol.countDocuments();
-    if (offcutsCount === 0) {
-      await offcutsCol.insertMany(DEFAULT_REBAR_OFFCUTS);
-      console.log('✅ Seeded demo rebar offcuts in MongoDB Atlas');
-    }
-  } catch (err) {
-    console.error('Error in initAtlasData:', err);
-  }
-}
-
-// DataService สำหรับจัดการข้อมูลทั้งหมด
 export const DataService = {
   // --- Profile & About ---
   async getProfile() {
@@ -1018,10 +999,69 @@ export const DataService = {
     return readLocalJson('rebar_items', DEFAULT_REBAR_ITEMS);
   },
 
+  async getRebarOffcutById(id) {
+    const database = await connectDB();
+    if (database) {
+      return await database.collection('rebar_offcuts').findOne({ id });
+    }
+    const offcuts = readLocalJson('rebar_offcuts', DEFAULT_REBAR_OFFCUTS);
+    return offcuts.find(o => o.id === id) || null;
+  },
+
+  async handleDeductAndRecycleOffcut(calculated) {
+    const offcut = await this.getRebarOffcutById(calculated.reusedOffcutId);
+    if (!offcut) return false;
+
+    const usedPieces = Math.max(1, parseInt(calculated.quantity) || 1);
+    const origPieces = Math.max(1, parseInt(offcut.quantity) || 1);
+    const remainingPieces = Math.max(0, origPieces - usedPieces);
+    const unitW = Number(offcut.unitWeight) || getUnitWeight(offcut.rebarType, 2.47);
+
+    if (remainingPieces > 0) {
+      // ยังมีเศษเดิมความยาวเดิมเหลืออยู่ -> ลดจำนวนลง แต่ยังคงสถานะ available
+      await this.updateRebarOffcut(offcut.id, {
+        quantity: remainingPieces,
+        weightKg: Number((offcut.length * remainingPieces * unitW).toFixed(2)),
+        status: 'available',
+        usedFor: `ตัดแบ่งไปใช้ ${usedPieces} ท่อน ให้: ${calculated.label}`
+      });
+    } else {
+      // ใช้หมดท่อนเดิม -> ตัดยอดเป็น used
+      await this.updateRebarOffcut(offcut.id, {
+        quantity: 0,
+        status: 'used',
+        usedFor: `นำมาใช้ทำ: ${calculated.label} (${usedPieces} ท่อน)`,
+        usedAt: new Date().toISOString()
+      });
+    }
+
+    // คำนวณเศษที่เหลือจากการตัดชิ้นนี้ (ถ้าความยาวเศษเดิม > ความยาวที่ตัดใช้จริง)
+    const cutLen = Number(calculated.cutLength) || 0;
+    const offcutLen = Number(offcut.length) || 0;
+    const remLength = Number((offcutLen - cutLen).toFixed(2));
+
+    // ตัวอย่างตามโจทย์: ต้องการ 1.00m จำนวน 2 ท่อน ตัดจากเศษ 1.40m 16 ท่อน
+    // จะเหลือเศษ 0.40m จำนวน 2 ท่อน เพิ่มเข้าคลังเศษสต็อกอัตโนมัติ!
+    if (remLength >= 0.1) {
+      await this.createRebarOffcut({
+        sourceLabel: `เศษตัดต่อจาก ${offcut.sourceLabel || calculated.label} (${offcutLen}m -> ${cutLen}m)`,
+        rebarType: calculated.rebarType || offcut.rebarType,
+        length: remLength,
+        quantity: usedPieces,
+        unitWeight: calculated.weightPerMeter || unitW,
+        status: 'available',
+        usedFor: '',
+        rebarItemId: calculated.id
+      });
+    }
+
+    return true;
+  },
+
   async createRebarItem(data) {
     const calculated = calculateRebarMetrics({
       ...data,
-      id: data.id || `rebar-${Date.now()}`
+      id: data.id || `item-${Date.now()}`
     });
 
     const database = await connectDB();
@@ -1034,21 +1074,23 @@ export const DataService = {
     }
 
     // หากมีการตัดที่ทำให้เกิดเศษ และไม่ใช่การดึงเศษมาใช้ -> บันทึกเข้าคลังเศษเหล็กอัตโนมัติ
-    if (calculated.totalOffcutLength > 0 && !calculated.isReusedOffcut) {
+    // โดยจำนวนท่อนเศษที่เกิด เท่ากับจำนวนเส้นมาตรฐานที่นำมาตัด (barsNeeded)
+    if (calculated.totalOffcutLength > 0 && !calculated.isReusedOffcut && calculated.materialCategory !== 'plate') {
+      const offcutQuantity = calculated.barsNeeded || 1;
       await this.createRebarOffcut({
         sourceLabel: calculated.label,
         rebarType: calculated.rebarType,
         length: calculated.offcutPerBar || calculated.totalOffcutLength,
-        quantity: 1,
+        quantity: offcutQuantity,
         unitWeight: calculated.weightPerMeter,
         usedFor: calculated.usedFor || '',
         rebarItemId: calculated.id
       });
     }
 
-    // หากเป็นการดึงเศษที่มีอยู่มาใช้ -> ทำเครื่องหมายเศษนั้นว่านำไปใช้แล้ว
+    // หากเป็นการดึงเศษที่มีอยู่มาใช้ -> ดำเนินการตัดยอดและเพิ่มเศษที่เหลือท่อนใหม่เข้าสต็อก
     if (calculated.reusedOffcutId) {
-      await this.markOffcutUsed(calculated.reusedOffcutId, `นำมาใช้ทำ: ${calculated.label}`);
+      await this.handleDeductAndRecycleOffcut(calculated);
     }
 
     return calculated;

@@ -12,6 +12,12 @@ import {
 } from 'lucide-react';
 import { api } from '../utils/api.js';
 import { compressUltraCompact, formatBytes } from '../utils/compressor.js';
+import { 
+  REBAR_STANDARDS, H_BEAM_STANDARDS, I_BEAM_STANDARDS, WF_STANDARDS,
+  BOX_STANDARDS, C_CHANNEL_STANDARDS, ROUND_PIPE_STANDARDS,
+  PVC_85_STANDARDS, PVC_135_STANDARDS, PVC_FITTING_TYPES, PVC_PIPE_SIZES,
+  UNIT_WEIGHT_LOOKUP, getUnitWeight
+} from '../utils/steelStandards.js';
 
 // ตารางมาตรฐานเหล็กโครงสร้างรูปพรรณรีดร้อน H-BEAMS (มอก. 1227-2558 / TIS STANDARD)
 export const H_BEAM_STANDARDS_TIS = [
@@ -57,7 +63,7 @@ export const H_BEAM_STANDARDS_TIS = [
 ];
 
 // มาตรฐานน้ำหนักเหล็กเส้นเสริมคอนกรีต (มอก. 24-2559) และเหล็กรูปพรรณรีดร้อน/เหล็กบีม H-BEAMS (มอก. 1227-2558) กก./ม.
-const REBAR_WEIGHTS = {
+const REBAR_WEIGHTS = { ...UNIT_WEIGHT_LOOKUP,
   // เหล็กเส้นกลม (Round Bar)
   RB6: 0.222,
   RB9: 0.499,
@@ -164,6 +170,11 @@ const getRebarSortRank = (barType) => {
     const n = m ? parseInt(m[0], 10) : 0;
     return 3000 + n;
   }
+  if (t.includes('เพลท') || t.startsWith('PL')) return 4000;
+  if (t.includes('กล่อง') || t.includes('SHS') || t.includes('RHS')) return 6000;
+  if (t.includes('C-') || t.includes('ตัวซี') || t.startsWith('C ')) return 7000;
+  if (t.includes('ท่อกลม') || t.startsWith('PIPE')) return 8000;
+  if (t.includes('PVC')) return 9000;
   return 5000;
 };
 
@@ -232,6 +243,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
   const [rebarForm, setRebarForm] = useState({
     group: 'งานโครงสร้างทั่วไป',
     label: '',
+    materialCategory: 'rebar', // 'rebar', 'beam', 'plate', 'box_c_pipe', 'pvc'
     rebarType: 'DB20',
     standardLength: 12,
     cutLength: 6.0,
@@ -239,7 +251,24 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
     usedFor: '',
     note: '',
     isReusedOffcut: false,
-    reusedOffcutId: ''
+    reusedOffcutId: '',
+    // Category specific
+    subCategory: 'H-Beam',
+    customType: false,
+    customSize: '',
+    customWeight: '',
+    plateWidth: 300,
+    plateLength: 300,
+    plateThickness: 6,
+    plateWeightKg: 4.24,
+    jboltSize: 'DB16',
+    jboltLength: 0.40,
+    jboltQtyPerPlate: 4,
+    nutQtyPerPlate: 4,
+    washerQtyPerPlate: 4,
+    pvcType: 'pipe',
+    fittingName: 'ข้อต่อตรง',
+    fittingSize: '2"'
   });
 
   // Project Editor State
@@ -431,11 +460,74 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
   }, [rebarItems, selectedRebarGroup, selectedRebarSize, calculateRebarSizeBreakdown]);
 
   // ========================================================
-  const calculateRebarMetrics = (stdLen, cutLen, qty, type, isReused, offcutInitialLen) => {
-    const sLen = Number(stdLen) || 12;
-    const cLen = Number(cutLen) || 1;
+  const calculateRebarMetrics = (stdLen, cutLen, qty, type, isReused, offcutInitialLen, formExtra = {}) => {
+    const category = formExtra.materialCategory || 'rebar';
     const count = Number(qty) || 1;
-    const unitWeight = REBAR_WEIGHTS[type] || 2.47;
+
+    // 1. หมวดงานเหล็กเพลท
+    if (category === 'plate') {
+      const plateWidth = Number(formExtra.plateWidth) || 300;
+      const plateLength = Number(formExtra.plateLength) || 300;
+      const plateThickness = Number(formExtra.plateThickness) || 6;
+      const autoPlateWeight = Number(((plateWidth / 1000) * (plateLength / 1000) * plateThickness * 7.85).toFixed(2));
+      const plateWeightKg = Number(formExtra.plateWeightKg) || autoPlateWeight;
+      const totalPlateWeightKg = Number((plateWeightKg * count).toFixed(2));
+
+      const jboltSize = formExtra.jboltSize || 'DB16';
+      const jboltLength = Number(formExtra.jboltLength) || 0.40;
+      const jboltQtyPerPlate = parseInt(formExtra.jboltQtyPerPlate) || 4;
+      const totalJBolts = jboltQtyPerPlate * count;
+      const jboltUnitWeight = getUnitWeight(jboltSize, 1.58);
+      const totalJBoltWeightKg = Number((totalJBolts * jboltLength * jboltUnitWeight).toFixed(2));
+
+      const nutQtyPerPlate = parseInt(formExtra.nutQtyPerPlate) || 4;
+      const washerQtyPerPlate = parseInt(formExtra.washerQtyPerPlate) || 4;
+      const totalWeightKg = Number((totalPlateWeightKg + totalJBoltWeightKg).toFixed(2));
+
+      return {
+        isPlate: true,
+        piecesPerBar: 0,
+        standardBarsNeeded: 0,
+        offcutPerBar: 0,
+        totalCutLength: 0,
+        totalStandardLength: 0,
+        totalScrapLength: 0,
+        scrapPercent: 0,
+        unitWeight: plateWeightKg,
+        plateWeightKg,
+        totalPlateWeightKg,
+        totalJBolts,
+        totalJBoltWeightKg,
+        totalNuts: nutQtyPerPlate * count,
+        totalWashers: washerQtyPerPlate * count,
+        totalWeightKg,
+        totalBarWeightKg: totalWeightKg
+      };
+    }
+
+    // 2. หมวดงานข้อต่อ/วาล์ว PVC
+    if (category === 'pvc' && (formExtra.pvcType === 'fitting' || formExtra.pvcType === 'valve')) {
+      return {
+        isFitting: true,
+        piecesPerBar: 0,
+        standardBarsNeeded: 0,
+        offcutPerBar: 0,
+        totalCutLength: 0,
+        totalStandardLength: 0,
+        totalScrapLength: 0,
+        scrapPercent: 0,
+        unitWeight: 0,
+        totalWeightKg: 0,
+        totalBarWeightKg: 0
+      };
+    }
+
+    // 3. หมวดตัดเป็นท่อน (เหล็กเส้น, เหล็กบีม, กล่อง/ตัวซี/ท่อกลม, ท่อ PVC)
+    const sLen = Number(stdLen) || (category === 'pvc' ? 4 : (category === 'box_c_pipe' ? 6 : 12));
+    const cLen = Number(cutLen) || 1;
+    const unitWeight = formExtra.customType && Number(formExtra.customWeight) 
+      ? Number(formExtra.customWeight) 
+      : (getUnitWeight(type, 2.47));
     const totalCutLength = Number((cLen * count).toFixed(2));
 
     if (isReused) {
@@ -461,7 +553,6 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
     const totalScrapLength = Math.max(0, totalStandardLength - totalCutLength);
     const scrapPercent = totalStandardLength > 0 ? ((totalScrapLength / totalStandardLength) * 100) : 0;
     
-    // Accurate offcut per bar calculation:
     const offcutPerBar = (standardBarsNeeded === 1) 
       ? totalScrapLength 
       : Number((totalScrapLength / standardBarsNeeded).toFixed(2));
@@ -485,22 +576,31 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
 
   const handleSaveRebar = async (e) => {
     e.preventDefault();
-    if (!rebarForm.cutLength || rebarForm.cutLength <= 0 || !rebarForm.quantity || rebarForm.quantity <= 0) {
-      showFeedback('error', 'กรุณาระบุความยาวตัดและจำนวนให้ถูกต้อง');
+    const isPlate = rebarForm.materialCategory === 'plate';
+    const isFitting = rebarForm.materialCategory === 'pvc' && (rebarForm.pvcType === 'fitting' || rebarForm.pvcType === 'valve');
+
+    if (!isPlate && !isFitting && (!rebarForm.cutLength || rebarForm.cutLength <= 0)) {
+      showFeedback('error', 'กรุณาระบุความยาวที่ตัดใช้ให้ถูกต้อง');
+      return;
+    }
+    if (!rebarForm.quantity || rebarForm.quantity <= 0) {
+      showFeedback('error', 'กรุณาระบุจำนวนชิ้น/ท่อนให้ถูกต้อง');
       return;
     }
     try {
       if (editingRebarItem) {
         await api.updateRebarItem(editingRebarItem.id, rebarForm);
-        showFeedback('success', 'แก้ไขรายการเหล็กเรียบร้อย และซิงก์ CAD/SketchUp สำเร็จ');
+        showFeedback('success', 'แก้ไขรายการวัสดุเรียบร้อย และซิงก์ระบบสำเร็จ');
       } else {
         await api.createRebarItem(rebarForm);
-        showFeedback('success', 'เพิ่มรายการเหล็กเรียบร้อย และระบบบันทึกเศษลงคลังอัตโนมัติ');
+        showFeedback('success', 'เพิ่มรายการวัสดุเรียบร้อย และระบบบันทึกข้อมูลอัตโนมัติ');
       }
       setIsRebarEditorOpen(false);
       setEditingRebarItem(null);
       setRebarForm({
+        group: availableRebarGroups[0] || 'งานเสา',
         label: '',
+        materialCategory: 'rebar',
         rebarType: 'DB20',
         standardLength: 12,
         cutLength: 6.0,
@@ -508,11 +608,27 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
         usedFor: '',
         note: '',
         isReusedOffcut: false,
-        reusedOffcutId: ''
+        reusedOffcutId: '',
+        subCategory: 'H-Beam',
+        customType: false,
+        customSize: '',
+        customWeight: '',
+        plateWidth: 300,
+        plateLength: 300,
+        plateThickness: 6,
+        plateWeightKg: 4.24,
+        jboltSize: 'DB16',
+        jboltLength: 0.40,
+        jboltQtyPerPlate: 4,
+        nutQtyPerPlate: 4,
+        washerQtyPerPlate: 4,
+        pvcType: 'pipe',
+        fittingName: 'ข้อต่อตรง',
+        fittingSize: '2"'
       });
       loadRebarData();
     } catch (err) {
-      showFeedback('error', 'บันทึกรายการเหล็กไม่สำเร็จ: ' + err.message);
+      showFeedback('error', 'บันทึกรายการไม่สำเร็จ: ' + err.message);
     }
   };
 
@@ -778,8 +894,22 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
     rebarForm.quantity,
     rebarForm.rebarType,
     rebarForm.isReusedOffcut,
-    selectedOffcut?.length
+    selectedOffcut?.length,
+    rebarForm
   );
+
+  // ฟังก์ชันลบรายการเศษเหล็กออกจากคลัง (ข้อกำหนด 6)
+  const handleDeleteOffcut = async (id, e) => {
+    if (e) e.stopPropagation();
+    if (!window.confirm('คุณต้องการลบรายการเศษเหล็กนี้ออกจากระบบใช่หรือไม่?')) return;
+    try {
+      await api.deleteRebarOffcut(id);
+      showFeedback('success', 'ลบรายการเศษเหล็กออกจากระบบเรียบร้อย');
+      loadRebarData();
+    } catch (err) {
+      showFeedback('error', 'ลบเศษเหล็กไม่สำเร็จ: ' + err.message);
+    }
+  };
 
   const filteredOffcuts = rebarOffcuts.filter(o => offcutFilter === 'all' || o.status === offcutFilter);
   const unreadMessagesCount = messages.filter(m => m.status === 'unread').length;
@@ -1031,6 +1161,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                           setRebarForm({
                             group: availableRebarGroups[0] || 'งานเสา',
                             label: '',
+                            materialCategory: 'rebar',
                             rebarType: 'DB20',
                             standardLength: 12,
                             cutLength: 6.0,
@@ -1038,7 +1169,23 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                             usedFor: '',
                             note: '',
                             isReusedOffcut: false,
-                            reusedOffcutId: ''
+                            reusedOffcutId: '',
+                            subCategory: 'H-Beam',
+                            customType: false,
+                            customSize: '',
+                            customWeight: '',
+                            plateWidth: 300,
+                            plateLength: 300,
+                            plateThickness: 6,
+                            plateWeightKg: 4.24,
+                            jboltSize: 'DB16',
+                            jboltLength: 0.40,
+                            jboltQtyPerPlate: 4,
+                            nutQtyPerPlate: 4,
+                            washerQtyPerPlate: 4,
+                            pvcType: 'pipe',
+                            fittingName: 'ข้อต่อตรง',
+                            fittingSize: '2"'
                           });
                           setIsRebarEditorOpen(true);
                         }}
@@ -1472,6 +1619,26 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                                         <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold">
                                           {groupName}
                                         </span>
+                                        {item.materialCategory === 'plate' && (
+                                          <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 text-[10px] font-bold">
+                                            เหล็กเพลท
+                                          </span>
+                                        )}
+                                        {item.materialCategory === 'beam' && (
+                                          <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 text-[10px] font-bold">
+                                            เหล็กบีม
+                                          </span>
+                                        )}
+                                        {item.materialCategory === 'box_c_pipe' && (
+                                          <span className="px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300 text-[10px] font-bold">
+                                            เหล็กรูปพรรณ
+                                          </span>
+                                        )}
+                                        {item.materialCategory === 'pvc' && (
+                                          <span className="px-1.5 py-0.5 rounded bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300 text-[10px] font-bold">
+                                            ท่อ PVC
+                                          </span>
+                                        )}
                                         {item.isReusedOffcut && (
                                           <span className="px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
                                             ดึงเศษมาใช้
@@ -1484,6 +1651,11 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                                           {item.usedFor || item.note}
                                         </span>
                                       )}
+                                      {item.materialCategory === 'plate' && (
+                                        <div className="text-[10px] text-purple-600 dark:text-purple-400 mt-1">
+                                          🔩 J-Bolt: {item.jboltSize || 'DB16'} ({item.totalJBolts || (item.quantity * (item.jboltQtyPerPlate || 4))} ตัว) | น็อต {item.totalNuts || (item.quantity * 4)} ตัว | แหวน {item.totalWashers || (item.quantity * 4)} ตัว
+                                        </div>
+                                      )}
                                     </td>
                                     <td className="p-3">
                                       <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300 font-bold border border-amber-200 dark:border-amber-800/40">
@@ -1491,46 +1663,68 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                                       </span>
                                     </td>
                                     <td className="p-3 text-slate-500">
-                                      {item.isReusedOffcut ? 'จากเศษสต็อก' : `เส้นมาตรฐาน ${stdLen}m`}
+                                      {item.materialCategory === 'plate' ? (
+                                        `เพลท ${item.plateWidth || 300}x${item.plateLength || 300}x${item.plateThickness || 6}mm`
+                                      ) : item.materialCategory === 'pvc' && (item.pvcType === 'fitting' || item.pvcType === 'valve') ? (
+                                        `ข้อต่อ ${item.fittingSize || '2"'}`
+                                      ) : item.isReusedOffcut ? (
+                                        'จากเศษสต็อก'
+                                      ) : (
+                                        `เส้นมาตรฐาน ${stdLen}m`
+                                      )}
                                     </td>
                                     <td className="p-3 text-right font-semibold text-slate-900 dark:text-white">
-                                      {cutLen} ม.
+                                      {item.materialCategory === 'plate' || (item.materialCategory === 'pvc' && (item.pvcType === 'fitting' || item.pvcType === 'valve')) ? '-' : `${cutLen} ม.`}
                                     </td>
                                     <td className="p-3 text-right font-semibold text-slate-900 dark:text-white">
-                                      {item.quantity} ชิ้น
+                                      {item.quantity} {item.materialCategory === 'plate' ? 'แผ่น' : 'ชิ้น'}
                                     </td>
                                     <td className="p-3 text-right font-bold text-emerald-600 dark:text-emerald-400 text-sm">
-                                      {barsNeeded} <span className="text-[10px] font-normal text-slate-400">เส้น</span>
+                                      {item.materialCategory === 'plate' || (item.materialCategory === 'pvc' && (item.pvcType === 'fitting' || item.pvcType === 'valve')) ? '-' : (
+                                        <>${barsNeeded} <span className="text-[10px] font-normal text-slate-400">เส้น</span></>
+                                      )}
                                     </td>
                                     <td className="p-3 text-right font-bold text-amber-600 dark:text-amber-400">
-                                      {offcutPerBar} ม.
+                                      {item.materialCategory === 'plate' || (item.materialCategory === 'pvc' && (item.pvcType === 'fitting' || item.pvcType === 'valve')) ? '-' : `${offcutPerBar} ม.`}
                                     </td>
                                     <td className="p-3 text-right">
-                                      <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${
-                                        scrapPercent > 15 ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                                      }`}>
-                                        {scrapPercent}%
-                                      </span>
+                                      {item.materialCategory === 'plate' || (item.materialCategory === 'pvc' && (item.pvcType === 'fitting' || item.pvcType === 'valve')) ? '-' : (
+                                        <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${
+                                          scrapPercent > 15 ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                                        }`}>
+                                          {scrapPercent}%
+                                        </span>
+                                      )}
                                     </td>
                                     <td className="p-3 text-right font-semibold text-indigo-600 dark:text-indigo-400">
                                       {weightKg} กก.
                                     </td>
                                     <td className="p-3 text-center min-w-[130px]">
-                                      <div className="w-full bg-slate-200 dark:bg-slate-700 h-3 rounded-full overflow-hidden flex" title={`ตัด ${pieces} ชิ้น ชิ้นละ ${cutLen}m, เศษเหลือ ${offcutPerBar}m`}>
-                                        {Array.from({ length: pieces }).map((_, pIdx) => (
-                                          <div
-                                            key={pIdx}
-                                            style={{ width: `${cutPercent}%` }}
-                                            className="bg-emerald-500 border-r border-slate-950/20"
-                                          />
-                                        ))}
-                                        {offcutPerBar > 0 && (
-                                          <div className="bg-amber-400 flex-1" />
-                                        )}
-                                      </div>
-                                      <span className="text-[9px] text-slate-400 mt-0.5 block">
-                                        ตัดได้ {pieces} ท่อน/เส้น
-                                      </span>
+                                      {item.materialCategory === 'plate' ? (
+                                        <div className="text-[10px] text-purple-600 dark:text-purple-400">
+                                          รวมเพลท {((item.plateWeightKg || 4.24) * item.quantity).toFixed(2)} กก.
+                                        </div>
+                                      ) : item.materialCategory === 'pvc' && (item.pvcType === 'fitting' || item.pvcType === 'valve') ? (
+                                        <span className="text-[10px] text-cyan-600">อุปกรณ์ข้อต่อ/วาล์ว</span>
+                                      ) : (
+                                        <>
+                                          <div className="w-full bg-slate-200 dark:bg-slate-700 h-3 rounded-full overflow-hidden flex" title={`ตัด ${pieces} ชิ้น ชิ้นละ ${cutLen}m, เศษเหลือ ${offcutPerBar}m`}>
+                                            {Array.from({ length: pieces }).map((_, pIdx) => (
+                                              <div
+                                                key={pIdx}
+                                                style={{ width: `${cutPercent}%` }}
+                                                className="bg-emerald-500 border-r border-slate-950/20"
+                                              />
+                                            ))}
+                                            {offcutPerBar > 0 && (
+                                              <div className="bg-amber-400 flex-1" />
+                                            )}
+                                          </div>
+                                          <span className="text-[9px] text-slate-400 mt-0.5 block">
+                                            ตัดได้ {pieces} ท่อน/เส้น
+                                          </span>
+                                        </>
+                                      )}
                                     </td>
                                     <td className="p-3 text-center">
                                       <div className="flex items-center justify-center gap-1">
@@ -1541,6 +1735,7 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                                             setRebarForm({
                                               group: groupName,
                                               label: label,
+                                              materialCategory: item.materialCategory || 'rebar',
                                               rebarType: barType,
                                               standardLength: stdLen,
                                               cutLength: cutLen,
@@ -1548,7 +1743,23 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                                               usedFor: item.usedFor || '',
                                               note: item.note || '',
                                               isReusedOffcut: Boolean(item.isReusedOffcut),
-                                              reusedOffcutId: item.reusedOffcutId || ''
+                                              reusedOffcutId: item.reusedOffcutId || '',
+                                              subCategory: item.subCategory || 'H-Beam',
+                                              customType: Boolean(item.customType),
+                                              customSize: item.customSize || '',
+                                              customWeight: item.customWeight || '',
+                                              plateWidth: item.plateWidth || 300,
+                                              plateLength: item.plateLength || 300,
+                                              plateThickness: item.plateThickness || 6,
+                                              plateWeightKg: item.plateWeightKg || 4.24,
+                                              jboltSize: item.jboltSize || 'DB16',
+                                              jboltLength: item.jboltLength || 0.40,
+                                              jboltQtyPerPlate: item.jboltQtyPerPlate || 4,
+                                              nutQtyPerPlate: item.nutQtyPerPlate || 4,
+                                              washerQtyPerPlate: item.washerQtyPerPlate || 4,
+                                              pvcType: item.pvcType || 'pipe',
+                                              fittingName: item.fittingName || 'ข้อต่อตรง',
+                                              fittingSize: item.fittingSize || '2"'
                                             });
                                             setIsRebarEditorOpen(true);
                                           }}
@@ -1723,20 +1934,42 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                                 </td>
                                 <td className="p-3 text-center">
                                   {offcut.status === 'available' ? (
-                                    <button
-                                      onClick={() => handleMarkOffcutUsed(offcut)}
-                                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 mx-auto shadow"
-                                    >
-                                      <CheckSquare className="w-3.5 h-3.5" />
-                                      <span>นำไปใช้แล้ว (ตัดยอด)</span>
-                                    </button>
+                                    <div className="flex items-center justify-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleMarkOffcutUsed(offcut)}
+                                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 shadow"
+                                      >
+                                        <CheckSquare className="w-3.5 h-3.5" />
+                                        <span>นำไปใช้แล้ว</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => handleDeleteOffcut(offcut.id, e)}
+                                        className="p-1.5 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-500 transition-colors"
+                                        title="ลบรายการเศษนี้"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
                                   ) : (
-                                    <button
-                                      onClick={() => handleRestoreOffcut(offcut.id)}
-                                      className="px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 text-slate-600 dark:text-slate-300 text-[10px] font-medium mx-auto"
-                                    >
-                                      กู้คืนกลับสต็อก
-                                    </button>
+                                    <div className="flex items-center justify-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRestoreOffcut(offcut.id)}
+                                        className="px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 text-slate-600 dark:text-slate-300 text-[10px] font-medium"
+                                      >
+                                        กู้คืน
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => handleDeleteOffcut(offcut.id, e)}
+                                        className="px-2.5 py-1 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:hover:bg-rose-900/50 dark:text-rose-400 text-[10px] font-medium flex items-center gap-1"
+                                        title="ลบรายการนี้"
+                                      >
+                                        <Trash2 className="w-3 h-3" /> ลบ
+                                      </button>
+                                    </div>
                                   )}
                                 </td>
                               </tr>
@@ -2868,30 +3101,92 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
       </div>
 
       {/* ========================================================
-          MODAL: REBAR ADD/EDIT (With Offcut Reuse Selection)
+          MODAL: REBAR ADD/EDIT (With 5 Material Categories & Offcut Reuse)
          ======================================================== */}
       {isRebarEditorOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
-            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/60 dark:bg-slate-800/40">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-2xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[94vh] flex flex-col">
+            
+            {/* Modal Header */}
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-800/40">
               <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
                 <Boxes className="w-4 h-4 text-emerald-500" />
-                <span>{editingRebarItem ? 'แก้ไขรายการถอดเหล็กเส้น' : 'เพิ่มรายการถอดเหล็กเส้น (BBS)'}</span>
+                <span>{editingRebarItem ? 'แก้ไขรายการวัสดุโครงสร้าง' : 'เพิ่มรายการถอดวัสดุโครงสร้าง (BBS & Steel Takeoff)'}</span>
               </h3>
-              <button type="button" onClick={() => setIsRebarEditorOpen(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white">
+              <button 
+                type="button" 
+                onClick={() => setIsRebarEditorOpen(false)} 
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
+            {/* Top Category Tabs (5 หมวดงานหลัก) */}
+            <div className="grid grid-cols-5 p-2 bg-slate-100/80 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 gap-1 text-center">
+              {[
+                { id: 'rebar', icon: '🔩', title: 'เหล็กเส้น', sub: 'มอก. RB/DB' },
+                { id: 'beam', icon: '🏗️', title: 'เหล็กบีม', sub: 'H/I/WF' },
+                { id: 'plate', icon: '⬛', title: 'เหล็กเพลท', sub: 'Plate+J-Bolt' },
+                { id: 'box_c_pipe', icon: '📦', title: 'กล่อง/C/ท่อ', sub: 'เหล็กรูปพรรณ' },
+                { id: 'pvc', icon: '💧', title: 'ท่อ PVC', sub: 'ท่อ & ข้อต่อ' }
+              ].map(cat => (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => {
+                    let defaultType = 'DB20';
+                    let defaultStdLen = 12;
+                    let defaultSub = 'H-Beam';
+                    if (cat.id === 'beam') { 
+                      defaultType = 'H 100x50x5x7 mm.'; 
+                      defaultStdLen = 6; 
+                      defaultSub = 'H-Beam';
+                    } else if (cat.id === 'plate') { 
+                      defaultType = 'เพลท 300x300x6mm'; 
+                      defaultStdLen = 0;
+                    } else if (cat.id === 'box_c_pipe') { 
+                      defaultType = 'SHS 50x50x2.3 mm.'; 
+                      defaultStdLen = 6; 
+                      defaultSub = 'SHS';
+                    } else if (cat.id === 'pvc') { 
+                      defaultType = 'PVC 8.5 2" (55mm)'; 
+                      defaultStdLen = 4; 
+                      defaultSub = 'pipe_85';
+                    }
+                    setRebarForm({
+                      ...rebarForm,
+                      materialCategory: cat.id,
+                      rebarType: defaultType,
+                      standardLength: defaultStdLen,
+                      subCategory: defaultSub,
+                      isReusedOffcut: false,
+                      reusedOffcutId: '',
+                      customType: false
+                    });
+                  }}
+                  className={`py-2 px-1 rounded-xl text-xs font-bold transition-all ${
+                    (rebarForm.materialCategory || 'rebar') === cat.id
+                      ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-sm border border-slate-200/80 dark:border-slate-700'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <div className="text-sm">{cat.icon}</div>
+                  <div className="leading-tight">{cat.title}</div>
+                  <div className="text-[9px] font-normal opacity-70 hidden sm:block">{cat.sub}</div>
+                </button>
+              ))}
+            </div>
+
             <form onSubmit={handleSaveRebar} className="p-5 overflow-y-auto space-y-4 text-xs">
               
-              {/* กลุ่ม/หมวดงาน (ข้อกำหนด 1) */}
+              {/* กลุ่ม/หมวดงาน (Common Field) */}
               <div>
                 <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
-                  🏗️ กลุ่ม / หมวดงาน (เช่น ฐานราก F1, งานเสา, งานคาน B1)
+                  🏗️ กลุ่ม / หมวดงาน (เช่น ฐานราก F1, งานเสา, งานคาน, งานโครงหลังคาเหล็ก)
                 </label>
                 <div className="flex flex-wrap gap-1 mb-1.5">
-                  {['ฐานราก F1', 'งานเสา', 'งานคาน', 'งานพื้น', 'งานโครงสร้างเหล็ก'].map(g => (
+                  {['ฐานราก F1', 'งานเสา', 'งานคาน', 'งานพื้น', 'งานโครงสร้างเหล็ก', 'งานสุขาภิบาล/ท่อ'].map(g => (
                     <button
                       key={g}
                       type="button"
@@ -2912,193 +3207,691 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                   value={rebarForm.group || ''}
                   onChange={(e) => setRebarForm({ ...rebarForm, group: e.target.value })}
                   placeholder="พิมพ์ชื่อกลุ่ม/หมวดงานใหม่ หรือเลือกจากด้านบน"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold"
                 />
               </div>
 
-              {/* ชื่อส่วนโครงสร้าง (ข้อกำหนด 2) */}
+              {/* ชื่อส่วนโครงสร้าง (Common Field) */}
               <div>
                 <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
-                  📌 ชื่อส่วนโครงสร้าง (เช่น เสา C1 ชั้น 1, คาน B2, ตอม่อ F1)
+                  📌 ชื่อส่วนโครงสร้าง (เช่น เสา C1 ช่วงล่าง, คาน B2, เพลทหัวเสา P1, แปหลังคา Purlin)
                 </label>
                 <input
                   type="text"
                   required
                   value={rebarForm.label || ''}
                   onChange={(e) => setRebarForm({ ...rebarForm, label: e.target.value })}
-                  placeholder="เช่น เสา C1 (ช่วงล่าง)"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  placeholder="เช่น เสา C1 ช่วงล่าง หรือ เพลท P1"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold"
                 />
               </div>
 
-              {/* ชนิดเหล็กเส้น มอก. + เหล็กบีม (ข้อกำหนด 3, 8) */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
-                    📐 ชนิดเหล็ก (มอก. + เหล็กบีม)
-                  </label>
-                  <select
-                    value={rebarForm.rebarType}
-                    onChange={(e) => setRebarForm({ ...rebarForm, rebarType: e.target.value, reusedOffcutId: '' })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold text-slate-800 dark:text-slate-200"
-                  >
-                    <optgroup label="เหล็กเส้นกลม (Round Bar - มอก.)">
-                      <option value="RB6">RB6 (0.222 kg/m)</option>
-                      <option value="RB9">RB9 (0.499 kg/m)</option>
-                      <option value="RB10">RB10 (0.617 kg/m)</option>
-                      <option value="RB12">RB12 (0.888 kg/m)</option>
-                    </optgroup>
-                    <optgroup label="เหล็กข้ออ้อย (Deformed Bar - มอก.)">
-                      <option value="DB10">DB10 (0.617 kg/m)</option>
-                      <option value="DB12">DB12 (0.888 kg/m)</option>
-                      <option value="DB16">DB16 (1.580 kg/m)</option>
-                      <option value="DB20">DB20 (2.470 kg/m)</option>
-                      <option value="DB25">DB25 (3.850 kg/m)</option>
-                      <option value="DB28">DB28 (4.830 kg/m)</option>
-                      <option value="DB32">DB32 (6.310 kg/m)</option>
-                      <option value="DB40">DB40 (9.865 kg/m)</option>
-                    </optgroup>
-                    <optgroup label="เหล็กโครงสร้างรูปพรรณรีดร้อน H-BEAMS (มอก. 1227-2558)">
-                      <option value="H-100x50">H-100x50 (9.30 kg/m)</option>
-                      <option value="H-100x100">H-100x100 (17.2 kg/m)</option>
-                      <option value="H-125x125">H-125x125 (23.8 kg/m)</option>
-                      <option value="H-150x75">H-150x75 (14.0 kg/m)</option>
-                      <option value="H-150x100">H-150x100 (21.1 kg/m)</option>
-                      <option value="H-150x150">H-150x150 (31.5 kg/m)</option>
-                      <option value="H-175x90">H-175x90 (18.1 kg/m)</option>
-                      <option value="H-175x175">H-175x175 (40.2 kg/m)</option>
-                      <option value="H-200x100">H-200x100 (21.3 kg/m)</option>
-                      <option value="H-200x100 (18.2k)">H-200x100 (18.2k) (18.2 kg/m)</option>
-                      <option value="H-200x150">H-200x150 (30.6 kg/m)</option>
-                      <option value="H-200x200">H-200x200 (49.9 kg/m)</option>
-                      <option value="H-200x200 (56.2k)">H-200x200 (56.2k) (56.2 kg/m)</option>
-                      <option value="H-200x200 (65.7k)">H-200x200 (65.7k) (65.7 kg/m)</option>
-                      <option value="H-250x125">H-250x125 (29.6 kg/m)</option>
-                      <option value="H-250x125 (25.7k)">H-250x125 (25.7k) (25.7 kg/m)</option>
-                      <option value="H-250x175">H-250x175 (44.1 kg/m)</option>
-                      <option value="H-250x250">H-250x250 (72.4 kg/m)</option>
-                      <option value="H-250x250 (64.4k)">H-250x250 (64.4k) (64.4 kg/m)</option>
-                      <option value="H-250x250 (82.2k)">H-250x250 (82.2k) (82.2 kg/m)</option>
-                      <option value="H-300x150">H-300x150 (36.7 kg/m)</option>
-                      <option value="H-300x150 (32k)">H-300x150 (32k) (32.0 kg/m)</option>
-                      <option value="H-300x200">H-300x200 (56.8 kg/m)</option>
-                      <option value="H-300x200 (65.4k)">H-300x200 (65.4k) (65.4 kg/m)</option>
-                      <option value="H-300x300">H-300x300 (94.0 kg/m)</option>
-                      <option value="H-300x300 (84.5k)">H-300x300 (84.5k) (84.5 kg/m)</option>
-                      <option value="H-300x300 (106k)">H-300x300 (106k) (106.0 kg/m)</option>
-                      <option value="H-350x175">H-350x175 (49.6 kg/m)</option>
-                      <option value="H-350x250">H-350x250 (79.7 kg/m)</option>
-                      <option value="H-350x350">H-350x350 (137.0 kg/m)</option>
-                    </optgroup>
-                    <optgroup label="เหล็กบีม I-Beam (มอก. 1227-2558)">
-                      <option value="IB100">IB100 (14.0 kg/m)</option>
-                      <option value="IB125">IB125 (17.5 kg/m)</option>
-                      <option value="IB150">IB150 (21.1 kg/m)</option>
-                      <option value="IB200">IB200 (26.0 kg/m)</option>
-                      <option value="IB250">IB250 (38.3 kg/m)</option>
-                    </optgroup>
-                    <optgroup label="Wide Flange (WF)">
-                      <option value="WF150">WF150 (14.0 kg/m)</option>
-                      <option value="WF200">WF200 (21.3 kg/m)</option>
-                      <option value="WF250">WF250 (29.6 kg/m)</option>
-                    </optgroup>
-                  </select>
-                </div>
-
-                {/* ความยาวมาตรฐานที่นำมาตัด เช่น 6m, 10m, 12m (ข้อกำหนด 4, 10) */}
-                <div>
-                  <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
-                    📏 ความยาวมาตรฐานที่นำมาตัด
-                  </label>
-                  <select
-                    disabled={rebarForm.isReusedOffcut}
-                    value={rebarForm.standardLength}
-                    onChange={(e) => setRebarForm({ ...rebarForm, standardLength: Number(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 disabled:opacity-50 font-bold"
-                  >
-                    <option value={6}>6.00 เมตร (สเปก 6m)</option>
-                    <option value={10}>10.00 เมตร (สเปก 10m)</option>
-                    <option value={12}>12.00 เมตร (สเปกมาตรฐาน 12m)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* ดึงเศษเหล็กในสต็อกมาใช้แทนเส้นใหม่ (ข้อกำหนด 3) */}
-              <div className="p-3 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-800/40 space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={rebarForm.isReusedOffcut}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      setRebarForm({
-                        ...rebarForm,
-                        isReusedOffcut: checked,
-                        reusedOffcutId: checked && availableOffcutsForType[0] ? availableOffcutsForType[0].id : ''
-                      });
-                    }}
-                    className="rounded text-amber-600 w-4 h-4"
-                  />
-                  <span className="font-bold text-amber-900 dark:text-amber-300">
-                    ♻️ ดึงเศษเหล็กในสต็อกมาใช้แทนเส้นใหม่ (ประหยัดค่าวัสดุ)
-                  </span>
-                </label>
-
-                {rebarForm.isReusedOffcut && (
-                  <div>
-                    {availableOffcutsForType.length === 0 ? (
-                      <p className="text-[11px] text-rose-500 font-medium">
-                        ไม่มีเศษเหล็ก {rebarForm.rebarType} คงเหลือในสต็อกที่ยาวพอ
-                      </p>
-                    ) : (
-                      <div className="space-y-1">
-                        <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300">
-                          เลือกเศษเหล็ก {rebarForm.rebarType} ในสต็อก ({availableOffcutsForType.length} ชิ้นที่ใช้ได้):
-                        </label>
-                        <select
-                          value={rebarForm.reusedOffcutId}
-                          onChange={(e) => {
-                            const off = availableOffcutsForType.find(o => o.id === e.target.value);
-                            setRebarForm({
-                              ...rebarForm,
-                              reusedOffcutId: e.target.value,
-                              cutLength: off ? Math.min(rebarForm.cutLength, off.length) : rebarForm.cutLength
-                            });
-                          }}
-                          className="w-full px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 font-semibold text-amber-800 dark:text-amber-200"
-                        >
-                          {availableOffcutsForType.map(o => (
-                            <option key={o.id} value={o.id}>
-                              เศษ {o.rebarType} ยาว {o.length} ม. (จาก {o.sourceLabel})
-                            </option>
+              {/* ========================================================
+                  หมวด 1: เหล็กเส้นเสริมคอนกรีต (มอก. RB/DB)
+                 ======================================================== */}
+              {(rebarForm.materialCategory === 'rebar' || !rebarForm.materialCategory) && (
+                <div className="space-y-3.5 p-3.5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                        📐 ขนาดเหล็กเส้น (มอก. 24-2559 / 20-2559)
+                      </label>
+                      <select
+                        value={rebarForm.rebarType}
+                        onChange={(e) => setRebarForm({ ...rebarForm, rebarType: e.target.value, reusedOffcutId: '' })}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-slate-800 dark:text-slate-200"
+                      >
+                        <optgroup label="เหล็กกล้าข้ออ้อย (Deformed Bar - DB)">
+                          {REBAR_STANDARDS.filter(r => r.type.startsWith('DB')).map(r => (
+                            <option key={r.type} value={r.type}>{r.type} ({r.weight} กก./ม.)</option>
                           ))}
-                        </select>
+                        </optgroup>
+                        <optgroup label="เหล็กเส้นกลม (Round Bar - RB)">
+                          {REBAR_STANDARDS.filter(r => r.type.startsWith('RB')).map(r => (
+                            <option key={r.type} value={r.type}>{r.type} ({r.weight} กก./ม.)</option>
+                          ))}
+                        </optgroup>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                        📏 ความยาวมาตรฐานที่นำมาตัด
+                      </label>
+                      <select
+                        disabled={rebarForm.isReusedOffcut}
+                        value={rebarForm.standardLength}
+                        onChange={(e) => setRebarForm({ ...rebarForm, standardLength: Number(e.target.value) })}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold disabled:opacity-50"
+                      >
+                        <option value={6}>6.00 เมตร (สเปก 6m)</option>
+                        <option value={10}>10.00 เมตร (สเปก 10m)</option>
+                        <option value={12}>12.00 เมตร (สเปกมาตรฐาน 12m)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* ดึงเศษเหล็กในสต็อกมาใช้แทนเส้นใหม่ */}
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-800/40 space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={rebarForm.isReusedOffcut}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setRebarForm({
+                            ...rebarForm,
+                            isReusedOffcut: checked,
+                            reusedOffcutId: checked && availableOffcutsForType[0] ? availableOffcutsForType[0].id : ''
+                          });
+                        }}
+                        className="rounded text-amber-600 w-4 h-4"
+                      />
+                      <span className="font-bold text-amber-900 dark:text-amber-300 text-xs">
+                        ♻️ ดึงเศษเหล็กในสต็อกมาใช้แทนเส้นใหม่ (ประหยัดค่าวัสดุ)
+                      </span>
+                    </label>
+
+                    {rebarForm.isReusedOffcut && (
+                      <div>
+                        {availableOffcutsForType.length === 0 ? (
+                          <p className="text-[11px] text-rose-500 font-medium">
+                            ไม่มีเศษเหล็ก {rebarForm.rebarType} คงเหลือในสต็อกที่ยาวพอสำหรับตัด
+                          </p>
+                        ) : (
+                          <div className="space-y-1">
+                            <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                              เลือกเศษเหล็ก {rebarForm.rebarType} ในสต็อก ({availableOffcutsForType.length} รายการที่ใช้ได้):
+                            </label>
+                            <select
+                              value={rebarForm.reusedOffcutId}
+                              onChange={(e) => {
+                                const off = availableOffcutsForType.find(o => o.id === e.target.value);
+                                setRebarForm({
+                                  ...rebarForm,
+                                  reusedOffcutId: e.target.value,
+                                  cutLength: off ? Math.min(rebarForm.cutLength, off.length) : rebarForm.cutLength
+                                });
+                              }}
+                              className="w-full px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 font-semibold text-amber-800 dark:text-amber-200 text-xs"
+                            >
+                              {availableOffcutsForType.map(o => (
+                                <option key={o.id} value={o.id}>
+                                  เศษ {o.rebarType || o.barType} ยาว {o.length} ม. ({o.quantity || 1} ท่อน) จาก {o.sourceLabel}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
-                )}
-              </div>
-
-              {/* ความยาวตัด และ จำนวนท่อน (ข้อกำหนด 5, 6) */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
-                    ความยาวที่ตัดใช้ (เมตร)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.1"
-                    max={rebarForm.isReusedOffcut && selectedOffcut ? selectedOffcut.length : rebarForm.standardLength}
-                    required
-                    value={rebarForm.cutLength}
-                    onChange={(e) => setRebarForm({ ...rebarForm, cutLength: Number(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
-                  />
                 </div>
+              )}
+
+              {/* ========================================================
+                  หมวด 2: เหล็กบีม (H-Beam / I-Beam / Wide Flange)
+                 ======================================================== */}
+              {rebarForm.materialCategory === 'beam' && (
+                <div className="space-y-3.5 p-3.5 rounded-2xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/50">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-blue-900 dark:text-blue-300 text-xs flex items-center gap-1.5">
+                      🏗️ หมวดงานเหล็กบีม (มอก. 1227-2558)
+                    </span>
+                    <label className="flex items-center gap-1.5 text-[11px] text-blue-700 dark:text-blue-400 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={rebarForm.customType}
+                        onChange={(e) => setRebarForm({ ...rebarForm, customType: e.target.checked })}
+                        className="rounded text-blue-600 w-3.5 h-3.5"
+                      />
+                      <span>พิมพ์ขนาดเอง (Custom)</span>
+                    </label>
+                  </div>
+
+                  {/* Sub-Tabs: H-Beam / I-Beam / WF */}
+                  {!rebarForm.customType && (
+                    <div>
+                      <div className="flex gap-1.5 mb-2">
+                        {['H-Beam', 'I-Beam', 'WF'].map(sub => (
+                          <button
+                            key={sub}
+                            type="button"
+                            onClick={() => {
+                              let firstItem = H_BEAM_STANDARDS[0];
+                              if (sub === 'I-Beam') firstItem = I_BEAM_STANDARDS[0];
+                              if (sub === 'WF') firstItem = WF_STANDARDS[0];
+                              setRebarForm({ 
+                                ...rebarForm, 
+                                subCategory: sub,
+                                rebarType: firstItem.label
+                              });
+                            }}
+                            className={`px-3 py-1 rounded-lg text-xs font-semibold ${
+                              (rebarForm.subCategory || 'H-Beam') === sub
+                                ? 'bg-blue-600 text-white shadow-sm'
+                                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                            }`}
+                          >
+                            {sub === 'H-Beam' ? 'H-Beam (57 ขนาด)' : sub === 'I-Beam' ? 'I-Beam (16 ขนาด)' : 'Wide Flange (39 ขนาด)'}
+                          </button>
+                        ))}
+                      </div>
+
+                      <select
+                        value={rebarForm.rebarType}
+                        onChange={(e) => setRebarForm({ ...rebarForm, rebarType: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl border border-blue-200 dark:border-blue-800 bg-white dark:bg-slate-900 font-semibold text-blue-900 dark:text-blue-100"
+                      >
+                        {(rebarForm.subCategory === 'I-Beam' 
+                          ? I_BEAM_STANDARDS 
+                          : rebarForm.subCategory === 'WF' 
+                          ? WF_STANDARDS 
+                          : H_BEAM_STANDARDS
+                        ).map((bm, i) => (
+                          <option key={i} value={bm.label}>
+                            {bm.label} — {bm.weight6m} กก./6ม. ({bm.weight} กก./ม.)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Custom Beam Input */}
+                  {rebarForm.customType && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                          ระบุชื่อ/ขนาดเหล็กบีม
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={rebarForm.rebarType}
+                          onChange={(e) => setRebarForm({ ...rebarForm, rebarType: e.target.value })}
+                          placeholder="เช่น H 200x100x5.5x8 mm."
+                          className="w-full px-3 py-2 rounded-xl border border-blue-200 dark:border-blue-800 bg-white dark:bg-slate-900 font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                          น้ำหนักเหล็ก (กก./เมตร)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          required
+                          value={rebarForm.customWeight || ''}
+                          onChange={(e) => setRebarForm({ ...rebarForm, customWeight: e.target.value })}
+                          placeholder="เช่น 21.30"
+                          className="w-full px-3 py-2 rounded-xl border border-blue-200 dark:border-blue-800 bg-white dark:bg-slate-900 font-semibold"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                      📏 ความยาวมาตรฐานเหล็กบีมที่นำมาตัด
+                    </label>
+                    <select
+                      value={rebarForm.standardLength || 6}
+                      onChange={(e) => setRebarForm({ ...rebarForm, standardLength: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl border border-blue-200 dark:border-blue-800 bg-white dark:bg-slate-900 font-bold"
+                    >
+                      <option value={6}>6.00 เมตร (สเปกมาตรฐานโรงงาน 6m)</option>
+                      <option value={9}>9.00 เมตร (สเปกสั่งพิเศษ 9m)</option>
+                      <option value={12}>12.00 เมตร (สเปกยาว 12m)</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* ========================================================
+                  หมวด 3: เหล็กเพลท (Steel Plate & J-Bolt)
+                 ======================================================== */}
+              {rebarForm.materialCategory === 'plate' && (
+                <div className="space-y-3.5 p-3.5 rounded-2xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/50">
+                  <div className="font-bold text-purple-900 dark:text-purple-300 text-xs flex items-center gap-1.5">
+                    ⬛ รายละเอียดแผ่นเพลทเหล็ก (Steel Plate Dimensions)
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <div>
+                      <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                        ความกว้าง (มม.)
+                      </label>
+                      <input
+                        type="number"
+                        min="10"
+                        required
+                        value={rebarForm.plateWidth || 300}
+                        onChange={(e) => {
+                          const w = Number(e.target.value);
+                          const l = Number(rebarForm.plateLength || 300);
+                          const t = Number(rebarForm.plateThickness || 6);
+                          const autoW = Number(((w / 1000) * (l / 1000) * t * 7.85).toFixed(2));
+                          setRebarForm({ 
+                            ...rebarForm, 
+                            plateWidth: w, 
+                            plateWeightKg: autoW,
+                            rebarType: `เพลท ${w}x${l}x${t}mm`
+                          });
+                        }}
+                        className="w-full px-3 py-2 rounded-xl border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                        ความยาว (มม.)
+                      </label>
+                      <input
+                        type="number"
+                        min="10"
+                        required
+                        value={rebarForm.plateLength || 300}
+                        onChange={(e) => {
+                          const l = Number(e.target.value);
+                          const w = Number(rebarForm.plateWidth || 300);
+                          const t = Number(rebarForm.plateThickness || 6);
+                          const autoW = Number(((w / 1000) * (l / 1000) * t * 7.85).toFixed(2));
+                          setRebarForm({ 
+                            ...rebarForm, 
+                            plateLength: l, 
+                            plateWeightKg: autoW,
+                            rebarType: `เพลท ${w}x${l}x${t}mm`
+                          });
+                        }}
+                        className="w-full px-3 py-2 rounded-xl border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                        ความหนา (มม.)
+                      </label>
+                      <select
+                        value={rebarForm.plateThickness || 6}
+                        onChange={(e) => {
+                          const t = Number(e.target.value);
+                          const w = Number(rebarForm.plateWidth || 300);
+                          const l = Number(rebarForm.plateLength || 300);
+                          const autoW = Number(((w / 1000) * (l / 1000) * t * 7.85).toFixed(2));
+                          setRebarForm({ 
+                            ...rebarForm, 
+                            plateThickness: t, 
+                            plateWeightKg: autoW,
+                            rebarType: `เพลท ${w}x${l}x${t}mm`
+                          });
+                        }}
+                        className="w-full px-3 py-2 rounded-xl border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 font-bold"
+                      >
+                        {[4.5, 6, 9, 12, 16, 19, 20, 22, 25, 28, 32].map(th => (
+                          <option key={th} value={th}>{th} มม.</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                      ⚖️ น้ำหนักแผ่นเพลทต่อ 1 แผ่น (คำนวณอัตโนมัติ หนา x กว้าง x ยาว x 7.85 หรือแก้ไขเองได้)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        value={rebarForm.plateWeightKg || ''}
+                        onChange={(e) => setRebarForm({ ...rebarForm, plateWeightKg: Number(e.target.value) })}
+                        className="w-full px-3 py-2 rounded-xl border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 font-black text-purple-700 dark:text-purple-300"
+                      />
+                      <span className="font-semibold text-slate-500 whitespace-nowrap">กก./แผ่น</span>
+                    </div>
+                  </div>
+
+                  {/* J-Bolt & อุปกรณ์น็อต */}
+                  <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-purple-200 dark:border-purple-800/80 space-y-2.5">
+                    <div className="font-bold text-slate-800 dark:text-slate-200 text-xs">
+                      🔩 อุปกรณ์ประกอบ J-Bolt / Anchor Bolt & น็อต-แหวนรอง
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold mb-1 text-slate-500">ขนาดเหล็ก J-Bolt</label>
+                        <select
+                          value={rebarForm.jboltSize || 'DB16'}
+                          onChange={(e) => setRebarForm({ ...rebarForm, jboltSize: e.target.value })}
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold"
+                        >
+                          {['DB12', 'DB16', 'DB20', 'DB25', 'RB12', 'RB16', 'RB19', 'RB25'].map(sz => (
+                            <option key={sz} value={sz}>{sz}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold mb-1 text-slate-500">ความยาวต่อตัว (ม.)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={rebarForm.jboltLength || 0.40}
+                          onChange={(e) => setRebarForm({ ...rebarForm, jboltLength: Number(e.target.value) })}
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold mb-1 text-slate-500">จำนวน J-Bolt/แผ่น</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={rebarForm.jboltQtyPerPlate || 4}
+                          onChange={(e) => setRebarForm({ ...rebarForm, jboltQtyPerPlate: parseInt(e.target.value) || 0 })}
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                      <div>
+                        <label className="block text-[10px] font-semibold mb-1 text-slate-500">หัวน็อต (Hex Nut) ต่อแผ่น</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={rebarForm.nutQtyPerPlate || 4}
+                          onChange={(e) => setRebarForm({ ...rebarForm, nutQtyPerPlate: parseInt(e.target.value) || 0 })}
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold mb-1 text-slate-500">แหวนรอง (Washer) ต่อแผ่น</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={rebarForm.washerQtyPerPlate || 4}
+                          onChange={(e) => setRebarForm({ ...rebarForm, washerQtyPerPlate: parseInt(e.target.value) || 0 })}
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ========================================================
+                  หมวด 4: เหล็กกล่อง, เหล็กตัวซี C, ท่อกลมดำ
+                 ======================================================== */}
+              {rebarForm.materialCategory === 'box_c_pipe' && (
+                <div className="space-y-3.5 p-3.5 rounded-2xl bg-orange-50/50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-900/50">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-orange-900 dark:text-orange-300 text-xs flex items-center gap-1.5">
+                      📦 หมวดงานเหล็กกล่อง, ตัวซี C, ท่อกลมดำ
+                    </span>
+                    <label className="flex items-center gap-1.5 text-[11px] text-orange-700 dark:text-orange-400 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={rebarForm.customType}
+                        onChange={(e) => setRebarForm({ ...rebarForm, customType: e.target.checked })}
+                        className="rounded text-orange-600 w-3.5 h-3.5"
+                      />
+                      <span>พิมพ์ขนาดเอง (Custom)</span>
+                    </label>
+                  </div>
+
+                  {!rebarForm.customType && (
+                    <div>
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {[
+                          { id: 'SHS', label: 'กล่องสี่เหลี่ยม (SHS)' },
+                          { id: 'RHS', label: 'กล่องแบน (RHS)' },
+                          { id: 'C', label: 'เหล็กตัวซี C' },
+                          { id: 'PIPE', label: 'ท่อกลมดำ' }
+                        ].map(sub => (
+                          <button
+                            key={sub.id}
+                            type="button"
+                            onClick={() => {
+                              let firstItem = BOX_STANDARDS.find(b => b.subType === 'SHS') || BOX_STANDARDS[0];
+                              if (sub.id === 'RHS') firstItem = BOX_STANDARDS.find(b => b.subType === 'RHS');
+                              if (sub.id === 'C') firstItem = C_CHANNEL_STANDARDS[0];
+                              if (sub.id === 'PIPE') firstItem = ROUND_PIPE_STANDARDS[0];
+                              setRebarForm({ 
+                                ...rebarForm, 
+                                subCategory: sub.id,
+                                rebarType: firstItem.label
+                              });
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${
+                              (rebarForm.subCategory || 'SHS') === sub.id
+                                ? 'bg-orange-600 text-white shadow-sm'
+                                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                            }`}
+                          >
+                            {sub.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <select
+                        value={rebarForm.rebarType}
+                        onChange={(e) => setRebarForm({ ...rebarForm, rebarType: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl border border-orange-200 dark:border-orange-800 bg-white dark:bg-slate-900 font-semibold text-orange-950 dark:text-orange-100"
+                      >
+                        {(rebarForm.subCategory === 'C' 
+                          ? C_CHANNEL_STANDARDS 
+                          : rebarForm.subCategory === 'PIPE' 
+                          ? ROUND_PIPE_STANDARDS 
+                          : rebarForm.subCategory === 'RHS'
+                          ? BOX_STANDARDS.filter(b => b.subType === 'RHS')
+                          : BOX_STANDARDS.filter(b => b.subType === 'SHS')
+                        ).map((item, i) => (
+                          <option key={i} value={item.label}>
+                            {item.label} — {item.weight6m} กก./6ม. ({item.weight} กก./ม.)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {rebarForm.customType && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                          ระบุชื่อ/ขนาดเหล็กรูปพรรณ
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={rebarForm.rebarType}
+                          onChange={(e) => setRebarForm({ ...rebarForm, rebarType: e.target.value })}
+                          placeholder="เช่น SHS 100x100x3.2 mm."
+                          className="w-full px-3 py-2 rounded-xl border border-orange-200 dark:border-orange-800 bg-white dark:bg-slate-900 font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                          น้ำหนักเหล็ก (กก./เมตร)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          required
+                          value={rebarForm.customWeight || ''}
+                          onChange={(e) => setRebarForm({ ...rebarForm, customWeight: e.target.value })}
+                          placeholder="เช่น 9.53"
+                          className="w-full px-3 py-2 rounded-xl border border-orange-200 dark:border-orange-800 bg-white dark:bg-slate-900 font-semibold"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                      📏 ความยาวมาตรฐานท่อนที่นำมาตัด
+                    </label>
+                    <select
+                      value={rebarForm.standardLength || 6}
+                      onChange={(e) => setRebarForm({ ...rebarForm, standardLength: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl border border-orange-200 dark:border-orange-800 bg-white dark:bg-slate-900 font-bold"
+                    >
+                      <option value={6}>6.00 เมตร (สเปกมาตรฐาน 6m)</option>
+                      <option value={12}>12.00 เมตร (สเปก 12m)</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* ========================================================
+                  หมวด 5: ท่อ PVC และข้อต่อ/วาล์ว (Class 8.5 & 13.5)
+                 ======================================================== */}
+              {rebarForm.materialCategory === 'pvc' && (
+                <div className="space-y-3.5 p-3.5 rounded-2xl bg-cyan-50/50 dark:bg-cyan-950/20 border border-cyan-200 dark:border-cyan-900/50">
+                  <div className="font-bold text-cyan-900 dark:text-cyan-300 text-xs flex items-center gap-1.5">
+                    💧 หมวดงานท่อ PVC และอุปกรณ์ข้อต่อ/วาล์ว
+                  </div>
+
+                  <div className="flex gap-1.5 mb-2">
+                    {[
+                      { id: 'pipe_85', label: 'ท่อ PVC ชั้น 8.5' },
+                      { id: 'pipe_135', label: 'ท่อ PVC ชั้น 13.5' },
+                      { id: 'fitting', label: 'ข้อต่อและวาล์ว PVC' }
+                    ].map(sub => (
+                      <button
+                        key={sub.id}
+                        type="button"
+                        onClick={() => {
+                          let defaultType = PVC_85_STANDARDS[0].label;
+                          let pvcType = 'pipe';
+                          let stdLen = 4;
+                          if (sub.id === 'pipe_135') defaultType = PVC_135_STANDARDS[0].label;
+                          if (sub.id === 'fitting') {
+                            defaultType = 'ข้อต่อตรง 2"';
+                            pvcType = 'fitting';
+                            stdLen = 0;
+                          }
+                          setRebarForm({ 
+                            ...rebarForm, 
+                            subCategory: sub.id,
+                            pvcType,
+                            rebarType: defaultType,
+                            standardLength: stdLen
+                          });
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${
+                          (rebarForm.subCategory || 'pipe_85') === sub.id
+                            ? 'bg-cyan-600 text-white shadow-sm'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        {sub.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {rebarForm.subCategory !== 'fitting' ? (
+                    <div>
+                      <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                        เลือกขนาดท่อ PVC (ความยาวมาตรฐาน 4.00 เมตร)
+                      </label>
+                      <select
+                        value={rebarForm.rebarType}
+                        onChange={(e) => setRebarForm({ ...rebarForm, rebarType: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl border border-cyan-200 dark:border-cyan-800 bg-white dark:bg-slate-900 font-semibold"
+                      >
+                        {(rebarForm.subCategory === 'pipe_135' ? PVC_135_STANDARDS : PVC_85_STANDARDS).map((p, i) => (
+                          <option key={i} value={p.label}>
+                            {p.label} — {p.weight4m} กก./4ม. ({p.weight} กก./ม.)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                          ประเภทข้อต่อ / อุปกรณ์ / วาล์ว
+                        </label>
+                        <select
+                          value={rebarForm.fittingName || 'ข้อต่อตรง'}
+                          onChange={(e) => {
+                            const name = e.target.value;
+                            const sz = rebarForm.fittingSize || '2"';
+                            setRebarForm({ 
+                              ...rebarForm, 
+                              fittingName: name, 
+                              rebarType: `${name} ${sz}` 
+                            });
+                          }}
+                          className="w-full px-3 py-2 rounded-xl border border-cyan-200 dark:border-cyan-800 bg-white dark:bg-slate-900 font-semibold"
+                        >
+                          {PVC_FITTING_TYPES.map((ft, i) => (
+                            <option key={i} value={ft.name}>{ft.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                          ขนาดท่อที่ใช้ (นิ้ว/มม.)
+                        </label>
+                        <select
+                          value={rebarForm.fittingSize || '2"'}
+                          onChange={(e) => {
+                            const sz = e.target.value;
+                            const name = rebarForm.fittingName || 'ข้อต่อตรง';
+                            setRebarForm({ 
+                              ...rebarForm, 
+                              fittingSize: sz, 
+                              rebarType: `${name} ${sz}` 
+                            });
+                          }}
+                          className="w-full px-3 py-2 rounded-xl border border-cyan-200 dark:border-cyan-800 bg-white dark:bg-slate-900 font-semibold"
+                        >
+                          {PVC_PIPE_SIZES.map((sz, i) => (
+                            <option key={i} value={sz}>{sz}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ความยาวที่ตัดใช้ และ จำนวนท่อน (สำหรับหมวดตัดเชิงเส้น) */}
+              {rebarForm.materialCategory !== 'plate' && !(rebarForm.materialCategory === 'pvc' && rebarForm.subCategory === 'fitting') && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                      ความยาวที่ตัดใช้ (เมตร)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.1"
+                      max={rebarForm.isReusedOffcut && selectedOffcut ? selectedOffcut.length : rebarForm.standardLength}
+                      required
+                      value={rebarForm.cutLength}
+                      onChange={(e) => setRebarForm({ ...rebarForm, cutLength: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                      จำนวนท่อนที่ต้องการตัด (ท่อน)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      required
+                      value={rebarForm.quantity}
+                      onChange={(e) => setRebarForm({ ...rebarForm, quantity: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* จำนวนสำหรับหมวดเพลท และ ข้อต่อ PVC */}
+              {(rebarForm.materialCategory === 'plate' || (rebarForm.materialCategory === 'pvc' && rebarForm.subCategory === 'fitting')) && (
                 <div>
                   <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300">
-                    จำนวนท่อนที่ต้องการตัด (ท่อน)
+                    {rebarForm.materialCategory === 'plate' ? 'จำนวนแผ่นเพลทที่ต้องการ (แผ่น)' : 'จำนวนข้อต่อ/อุปกรณ์ที่ต้องการ (ชิ้น)'}
                   </label>
                   <input
                     type="number"
@@ -3106,10 +3899,10 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     required
                     value={rebarForm.quantity}
                     onChange={(e) => setRebarForm({ ...rebarForm, quantity: Number(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold text-sm"
                   />
                 </div>
-              </div>
+              )}
 
               {/* ปลายทางนำเศษไปใช้ / หมายเหตุ */}
               <div>
@@ -3126,30 +3919,51 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
               </div>
 
               {/* Live Preview Calculation */}
-              <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800/60 space-y-2">
+              <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/40 rounded-2xl border border-emerald-200 dark:border-emerald-800/60 space-y-2">
                 <div className="font-bold text-emerald-800 dark:text-emerald-300 text-xs">
-                  📊 ผลการคำนวณอัตโนมัติ (Live Calculation):
+                  📊 สรุปผลการคำนวณอัตโนมัติ (Live Calculation):
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700 dark:text-slate-300">
-                  <div>ตัดได้ต่อเส้น: <b>{currentCalc.piecesPerBar} ท่อน</b></div>
-                  <div>ต้องใช้เส้นมาตรฐาน: <b className="text-emerald-600 dark:text-emerald-400 font-bold">{currentCalc.standardBarsNeeded} เส้น</b></div>
-                  <div>เศษเหลือต่อเส้น: <b className="text-amber-600 font-bold">{currentCalc.offcutPerBar} ม.</b></div>
-                  <div>เศษสูญเปล่า: <b>{currentCalc.scrapPercent}%</b></div>
-                  <div className="col-span-2">น้ำหนักเหล็กตัดใช้: <b className="text-indigo-600 dark:text-indigo-400">{currentCalc.totalWeightKg} กก.</b> ({(currentCalc.totalWeightKg / 1000).toFixed(3)} ตัน)</div>
-                </div>
+
+                {rebarForm.materialCategory === 'plate' ? (
+                  <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700 dark:text-slate-300">
+                    <div>รวมแผ่นเพลท: <b className="text-purple-600 dark:text-purple-400">{rebarForm.quantity} แผ่น</b></div>
+                    <div>น้ำหนักเพลทรวม: <b>{currentCalc.totalPlateWeightKg} กก.</b></div>
+                    <div>รวม J-Bolt ทั้งหมด: <b className="text-indigo-600 font-bold">{currentCalc.totalJBolts} ตัว</b> ({currentCalc.totalJBoltWeightKg} กก.)</div>
+                    <div>รวมหัวน็อต: <b>{currentCalc.totalNuts} ตัว</b> | แหวน: <b>{currentCalc.totalWashers} ตัว</b></div>
+                    <div className="col-span-2 pt-1 border-t border-emerald-200 dark:border-emerald-800 font-bold text-emerald-800 dark:text-emerald-300">
+                      น้ำหนักรวมทั้งหมด (เพลท + J-Bolt): {currentCalc.totalWeightKg} กก. ({(currentCalc.totalWeightKg / 1000).toFixed(3)} ตัน)
+                    </div>
+                  </div>
+                ) : rebarForm.materialCategory === 'pvc' && rebarForm.subCategory === 'fitting' ? (
+                  <div className="text-[11px] text-slate-700 dark:text-slate-300">
+                    <div>รวมจำนวนอุปกรณ์: <b className="text-cyan-600 font-bold">{rebarForm.quantity} ชิ้น</b></div>
+                    <div>ชนิดอุปกรณ์: <b>{rebarForm.rebarType}</b></div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700 dark:text-slate-300">
+                    <div>ตัดได้ต่อเส้น: <b>{currentCalc.piecesPerBar} ท่อน</b></div>
+                    <div>ต้องใช้เส้นมาตรฐาน: <b className="text-emerald-600 dark:text-emerald-400 font-bold">{currentCalc.standardBarsNeeded} เส้น</b></div>
+                    <div>เศษเหลือต่อเส้น: <b className="text-amber-600 font-bold">{currentCalc.offcutPerBar} ม.</b></div>
+                    <div>เศษสูญเปล่า: <b>{currentCalc.scrapPercent}%</b></div>
+                    <div className="col-span-2">
+                      น้ำหนักวัสดุตัดใช้: <b className="text-indigo-600 dark:text-indigo-400">{currentCalc.totalWeightKg} กก.</b> ({(currentCalc.totalWeightKg / 1000).toFixed(3)} ตัน)
+                    </div>
+                  </div>
+                )}
               </div>
 
+              {/* Action Buttons */}
               <div className="pt-2 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsRebarEditorOpen(false)}
-                  className="px-4 py-2 border rounded-xl"
+                  className="px-4 py-2 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl font-medium"
                 >
                   ยกเลิก
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl shadow"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-md shadow-emerald-600/20"
                 >
                   {editingRebarItem ? 'บันทึกการแก้ไข' : 'บันทึกรายการ'}
                 </button>
