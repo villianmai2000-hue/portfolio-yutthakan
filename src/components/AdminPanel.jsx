@@ -2390,89 +2390,198 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                     </div>
                   </div>
 
-                  {/* Section 1: AutoCAD Integration */}
-                  <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-2xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 flex items-center justify-center font-bold text-lg">
+                  {/* Section 1: AutoCAD Integration (AutoLISP) */}
+                  <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
+                    <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+                      <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 flex items-center justify-center font-black text-xl shadow-inner">
                         CAD
                       </div>
                       <div>
-                        <h4 className="text-base font-bold text-slate-900 dark:text-white">
-                          1. วิธีใช้งานใน AutoCAD (AutoLISP: rebar_sync.lsp)
+                        <h4 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                          <span>1. วิธีใช้งานใน AutoCAD (AutoLISP: rebar_sync.lsp)</span>
+                          <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 text-[10px] font-bold">
+                            รองรับ 10 คำสั่งแยกหมวดชัดเจน
+                          </span>
                         </h4>
                         <p className="text-xs text-slate-500">
-                          ส่งข้อมูลจาก AutoCAD ขึ้นเว็บ และสั่งวาดตาราง BBS ลงใน Drawing อัตโนมัติ
+                          ส่งข้อมูลถอดแบบจาก AutoCAD ขึ้น Cloud Database Real-Time 2 ทิศทาง และสั่งวาดตาราง BBS ลงใน Drawing อัตโนมัติ
                         </p>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                      <div className="space-y-3">
-                        <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
-                          <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
-                            <span className="w-5 h-5 rounded-full bg-rose-600 text-white text-[11px] flex items-center justify-center font-bold">1</span>
-                            <span>ขั้นตอนการโหลดปลั๊กอินเข้า AutoCAD:</span>
-                          </div>
-                          <ol className="list-decimal list-inside space-y-1 text-xs text-slate-600 dark:text-slate-300 pl-1 leading-relaxed">
-                            <li>กดปุ่มสีแดง <b>"โหลดปลั๊กอิน AutoCAD (.lsp)"</b> ด้านบนเพื่อเซฟไฟล์ <code className="bg-slate-200 dark:bg-slate-700 px-1 py-0.5 rounded">rebar_sync.lsp</code></li>
-                            <li>เปิดโปรแกรม AutoCAD แล้วพิมพ์คำสั่ง <kbd className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 rounded font-mono font-bold text-slate-900 dark:text-white">APPLOAD</kbd> แล้วกด Enter</li>
-                            <li>เลือกไฟล์ <code className="bg-slate-200 dark:bg-slate-700 px-1 py-0.5 rounded">rebar_sync.lsp</code> ที่ดาวน์โหลดไว้ แล้วกดปุ่ม <b>Load</b> (หากต้องการให้โหลดทุกครั้งที่เปิด ให้ลากเข้า Startup Suite)</li>
-                            <li>ที่หน้าต่าง Command Line จะขึ้นข้อความ <span className="text-emerald-600 font-bold">[สำเร็จ] โหลดปลั๊กอิน Yutthakan Rebar Sync เรียบร้อย!</span></li>
-                          </ol>
-                        </div>
+                    {/* Step 1: APPLOAD */}
+                    <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                      <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-rose-600 text-white text-[11px] flex items-center justify-center font-bold">1</span>
+                        <span>ขั้นตอนการติดตั้งและโหลดปลั๊กอินเข้า AutoCAD:</span>
+                      </div>
+                      <ol className="list-decimal list-inside space-y-1.5 text-xs text-slate-600 dark:text-slate-300 pl-1 leading-relaxed">
+                        <li>กดปุ่มสีแดง <b>"โหลดปลั๊กอิน AutoCAD (.lsp)"</b> ด้านบนเพื่อดาวน์โหลดไฟล์ <code className="bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded font-mono font-bold text-rose-600">rebar_sync.lsp</code></li>
+                        <li>เปิดโปรแกรม AutoCAD แล้วพิมพ์คำสั่ง <kbd className="px-2 py-0.5 bg-slate-200 dark:bg-slate-700 rounded font-mono font-bold text-slate-900 dark:text-white">APPLOAD</kbd> แล้วกด Enter</li>
+                        <li>เลือกไฟล์ <code className="bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded font-mono">rebar_sync.lsp</code> แล้วกดปุ่ม <b>Load</b> (แนะนำ: ลากไฟล์เข้าใส่ไอคอนกระเป๋า <b>Startup Suite</b> เพื่อให้โหลดอัตโนมัติทุกครั้งที่เปิด AutoCAD)</li>
+                        <li>ที่หน้าต่าง Command Line จะขึ้นข้อความยืนยัน: <span className="text-emerald-600 dark:text-emerald-400 font-bold">[สำเร็จ] โหลดปลั๊กอิน Yutthakan Rebar Sync เรียบร้อย!</span></li>
+                      </ol>
+                    </div>
 
-                        <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
-                          <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
-                            <span className="w-5 h-5 rounded-full bg-rose-600 text-white text-[11px] flex items-center justify-center font-bold">2</span>
-                            <span>คำสั่ง REBAR_SYNC (ส่งข้อมูลขึ้นเว็บ):</span>
-                          </div>
-                          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                            พิมพ์คำสั่ง <kbd className="px-1.5 py-0.5 bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 rounded font-mono font-bold">REBAR_SYNC</kbd> ระบบจะถาม 6 ขั้นตอนตามลำดับ:
-                          </p>
-                          <ul className="list-disc list-inside space-y-1 text-xs text-slate-600 dark:text-slate-300 pl-1">
-                            <li><b>ขั้น 1:</b> เลือกกลุ่ม/หมวดงาน (เช่น ฐานราก F1, เสา C1) หรือกด [0] พิมพ์ชื่อใหม่</li>
-                            <li><b>ขั้น 2:</b> ระบุชื่อโครงสร้าง (เช่น เสา C1, คาน B1) หรือกด [0] พิมพ์ใหม่</li>
-                            <li><b>ขั้น 3:</b> เลือกขนาดเหล็ก (RB6-RB12, DB10-DB40, เหล็กบีม หรือ [99] ดึงเศษในคลัง)</li>
-                            <li><b>ขั้น 4:</b> เลือกความยาวมาตรฐานที่นำมาตัด ([1]=6m, [2]=10m, [3]=12m)</li>
-                            <li><b>ขั้น 5:</b> ระบุความยาวที่ตัดใช้งานจริง (เช่น 6.0, 4.5 ม.)</li>
-                            <li><b>ขั้น 6:</b> ระบุจำนวนท่อนที่ต้องการตัด (ท่อน)</li>
-                          </ul>
-                          <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 text-[11px] font-medium border border-emerald-200 dark:border-emerald-800/40">
-                            ✓ ข้อมูลจะส่งเข้าสู่ระบบฐานข้อมูลคลาวด์และแสดงบนหน้าเว็บภายใน 5 วินาทีทันที!
-                          </div>
-                        </div>
+                    {/* Step 2: Individual Commands */}
+                    <div className="space-y-3">
+                      <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-rose-600 text-white text-[11px] flex items-center justify-center font-bold">2</span>
+                        <span>คำสั่งถอดแบบแยกตามหมวดวัสดุ (พิมพ์สั่งการได้โดยตรง):</span>
                       </div>
 
-                      <div className="space-y-3">
-                        <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
-                          <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
-                            <span className="w-5 h-5 rounded-full bg-rose-600 text-white text-[11px] flex items-center justify-center font-bold">3</span>
-                            <span>คำสั่ง REBAR_DRAW (วาดตาราง BBS ลงในแบบ):</span>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {/* SYNC_REBAR */}
+                        <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono font-black text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 px-2 py-0.5 rounded-lg border border-rose-200 dark:border-rose-900/50">
+                              SYNC_REBAR (หรือ REBAR_SYNC)
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400">🔩 งานเหล็กเส้น (มอก.)</span>
                           </div>
-                          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                            พิมพ์คำสั่ง <kbd className="px-1.5 py-0.5 bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 rounded font-mono font-bold">REBAR_DRAW</kbd> แล้วคลิกเมาส์ที่ตำแหน่งที่ต้องการวางตารางใน Drawing
+                          <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                            <b>วิธีใช้:</b> พิมพ์คำสั่งแล้วทำตาม 6 ขั้นตอน:
                           </p>
-                          <ul className="list-disc list-inside space-y-1 text-xs text-slate-600 dark:text-slate-300 pl-1">
-                            <li>AutoCAD จะดึงข้อมูลล่าสุดจากเซิร์ฟเวอร์แบบ Real-Time</li>
-                            <li>วาดเส้นกรอบตาราง (Grid Lines) หัวตาราง และข้อความชิ้นงานให้ครบถ้วน</li>
-                            <li>แสดงคอลัมน์ชื่อชิ้นส่วน ขนาดเหล็ก ความยาวตัด จำนวน เส้นเต็ม เศษเหลือ และน้ำหนักรวม</li>
+                          <ul className="text-[11px] text-slate-500 space-y-0.5 list-disc list-inside">
+                            <li>เลือกกลุ่ม/หมวดงาน (ฐานราก, เสา, คาน หรือพิมพ์ชื่อใหม่)</li>
+                            <li>ระบุชื่อส่วนโครงสร้าง (เช่น เสา C1, คาน B2)</li>
+                            <li>เลือกขนาดเหล็ก (RB6-RB12, DB10-DB40) หรือกด 99 ดึงเศษในสต็อก</li>
+                            <li>เลือกความยาวมาตรฐานที่นำมาตัด (10.0m หรือ 12.0m)</li>
+                            <li>ระบุความยาวที่ตัดใช้จริง (เมตร) และจำนวนท่อนที่ต้องการตัด</li>
                           </ul>
                         </div>
 
-                        <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
-                          <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
-                            <span className="w-5 h-5 rounded-full bg-rose-600 text-white text-[11px] flex items-center justify-center font-bold">4</span>
-                            <span>คำสั่งอื่นๆ ใน AutoCAD:</span>
+                        {/* SYNC_CONCRETE */}
+                        <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono font-black text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-lg border border-amber-200 dark:border-amber-900/50">
+                              SYNC_CONCRETE
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400">🧱 งานปูนคอนกรีต</span>
                           </div>
-                          <div className="space-y-1.5 text-xs">
-                            <div className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
-                              <code className="font-bold text-rose-600 font-mono">REBAR_HELP</code>
-                              <span className="text-slate-500">แสดงเมนูคำสั่งช่วยเหลือทั้งหมด</span>
-                            </div>
-                            <div className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
-                              <code className="font-bold text-rose-600 font-mono">REBAR_WEB</code>
-                              <span className="text-slate-500">เปิดหน้าต่างระบบเว็บจัดการเหล็กเส้น</span>
-                            </div>
+                          <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                            <b>วิธีใช้:</b> คิดปริมาณปูนคอนกรีตผสมเสร็จ (คิว m³):
+                          </p>
+                          <ul className="text-[11px] text-slate-500 space-y-0.5 list-disc list-inside">
+                            <li>เลือกกำลังอัด (240, 280, 300, 350, 400 ksc หรือพิมพ์เอง)</li>
+                            <li>ระบุ กว้าง (ม.) &times; ยาว (ม.) &times; ลึก/หนา/สูง (ม.)</li>
+                            <li>ระบุจำนวนชิ้นส่วน (จุด / ฐาน / ต้น)</li>
+                            <li>ระบุ % เผื่อเท Slump Loss (ค่าเริ่มต้น 5.0%)</li>
+                            <li>ระบบคำนวณปริมาตรสุทธิและปริมาตรรวมสั่งส่งขึ้นเว็บทันที</li>
+                          </ul>
+                        </div>
+
+                        {/* SYNC_BEAM */}
+                        <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono font-black text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded-lg border border-blue-200 dark:border-blue-900/50">
+                              SYNC_BEAM
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400">🏗️ งานเหล็กบีม</span>
+                          </div>
+                          <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                            <b>วิธีใช้:</b> ถอดเหล็กโครงสร้าง H-Beam, I-Beam, Wide Flange:
+                          </p>
+                          <ul className="text-[11px] text-slate-500 space-y-0.5 list-disc list-inside">
+                            <li>เลือกขนาดมาตรฐานจากรายการ (เช่น H 150x150x7x10 mm.) หรือพิมพ์ขนาดเอง</li>
+                            <li>เลือกความยาวมาตรฐานบีม (6m, 9m, 12m)</li>
+                            <li>ระบุความยาวที่ตัดใช้งานจริง และจำนวนท่อนที่ต้องการตัด</li>
+                          </ul>
+                        </div>
+
+                        {/* SYNC_PLATE */}
+                        <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono font-black text-xs text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60 px-2 py-0.5 rounded-lg border border-purple-200 dark:border-purple-900/50">
+                              SYNC_PLATE
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400">⬛ งานเหล็กเพลท & J-Bolt</span>
+                          </div>
+                          <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                            <b>วิธีใช้:</b> ถอดแผ่นเพลทหัวเสา/ฐานราก พร้อมอุปกรณ์ยึด:
+                          </p>
+                          <ul className="text-[11px] text-slate-500 space-y-0.5 list-disc list-inside">
+                            <li>ระบุ กว้าง &times; ยาว &times; หนา (มม.) และจำนวนแผ่น</li>
+                            <li>ระบุสเปก J-Bolt (ขนาด, ความยาว, จำนวนต่อแผ่น) และน็อต/แหวน</li>
+                            <li>ระบบคำนวณน้ำหนักเหล็กแผ่นและน้ำหนัก J-Bolt รวมให้อัตโนมัติ</li>
+                          </ul>
+                        </div>
+
+                        {/* SYNC_BOX & LIPC & PIPE */}
+                        <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono font-black text-xs text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-950/60 px-2 py-0.5 rounded-lg border border-orange-200 dark:border-orange-900/50">
+                              SYNC_BOX / SYNC_LIPC / SYNC_PIPE
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400">📦 งานเหล็กรูปพรรณ</span>
+                          </div>
+                          <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                            <b>วิธีใช้:</b> ถอดเหล็กกล่อง, ตัวซี C, และท่อกลม:
+                          </p>
+                          <ul className="text-[11px] text-slate-500 space-y-0.5 list-disc list-inside">
+                            <li><code className="text-orange-600 font-bold">SYNC_BOX</code>: เหล็กกล่องสี่เหลี่ยมจัตุรัสและผืนผ้า (SHS/RHS)</li>
+                            <li><code className="text-orange-600 font-bold">SYNC_LIPC</code>: เหล็กตัวซีสำหรับงานแปหลังคาและโครงผนัง</li>
+                            <li><code className="text-orange-600 font-bold">SYNC_PIPE</code>: ท่อเหล็กกลมโครงสร้าง</li>
+                          </ul>
+                        </div>
+
+                        {/* SYNC_PVC */}
+                        <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono font-black text-xs text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-950/60 px-2 py-0.5 rounded-lg border border-cyan-200 dark:border-cyan-900/50">
+                              SYNC_PVC
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400">💧 งานท่อ PVC & ข้อต่อ</span>
+                          </div>
+                          <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                            <b>วิธีใช้:</b> ถอดท่อประปา/สุขาภิบาล และอุปกรณ์:
+                          </p>
+                          <ul className="text-[11px] text-slate-500 space-y-0.5 list-disc list-inside">
+                            <li>เลือกขนาดท่อ PVC ชั้น 8.5 หรือชั้น 13.5 (ความยาวมาตรฐาน 4.0 ม.)</li>
+                            <li>หรือเลือกหมวดข้อต่อ/วาล์ว (ระบุประเภท เช่น ข้อต่อตรง ข้องอ 90 สามทาง และขนาด)</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Step 3: Drawing & Utility Commands */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                      <div className="p-4 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-2xl border border-emerald-200 dark:border-emerald-800/50 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono font-black text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/60 px-2 py-0.5 rounded-lg">
+                            REBAR_DRAW
+                          </span>
+                          <span className="text-[10px] font-bold text-emerald-600">📊 วาดตาราง BBS ลงในแบบ CAD</span>
+                        </div>
+                        <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                          <b>วิธีใช้:</b> พิมพ์คำสั่ง <kbd className="font-mono font-bold bg-white dark:bg-slate-800 px-1.5 py-0.5 rounded border border-emerald-300">REBAR_DRAW</kbd> แล้วคลิกเมาส์ 1 ครั้งที่จุดที่ต้องการวางตารางใน Drawing:
+                        </p>
+                        <ul className="text-[11px] text-slate-600 dark:text-slate-400 space-y-0.5 list-disc list-inside">
+                          <li>AutoCAD จะดึงข้อมูลล่าสุดจาก Cloud มาวาดตาราง Bar Bending Schedule ให้ทันที</li>
+                          <li>วาดเส้นกรอบตาราง (Grid Lines) สวยงาม พร้อมคอลัมน์ชื่อชิ้นส่วน ขนาดเหล็ก ความยาวตัด จำนวน เส้นเต็ม เศษเหลือ และน้ำหนักรวม</li>
+                        </ul>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                        <div className="font-bold text-xs text-slate-900 dark:text-white">
+                          ⚙️ คำสั่งช่วยเหลือและจัดการระบบใน AutoCAD:
+                        </div>
+                        <div className="space-y-1.5 text-xs">
+                          <div className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                            <code className="font-bold text-rose-600 font-mono">SYNC_MENU</code>
+                            <span className="text-slate-500 text-[11px]">เปิดเมนูรวมเลือกหมวดงาน (1-9)</span>
+                          </div>
+                          <div className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                            <code className="font-bold text-rose-600 font-mono">REBAR_OFFCUTS</code>
+                            <span className="text-slate-500 text-[11px]">เช็ครายการเศษเหล็กคงเหลือในสต็อก</span>
+                          </div>
+                          <div className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                            <code className="font-bold text-rose-600 font-mono">REBAR_WEB</code>
+                            <span className="text-slate-500 text-[11px]">เปิดหน้าต่าง Web Browser จัดการระบบทันที</span>
+                          </div>
+                          <div className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                            <code className="font-bold text-rose-600 font-mono">REBAR_HELP</code>
+                            <span className="text-slate-500 text-[11px]">แสดงคำแนะนำการใช้คำสั่งทั้งหมด</span>
                           </div>
                         </div>
                       </div>
@@ -2480,122 +2589,67 @@ export default function AdminPanel({ isOpen, onClose, onRefreshData, initialTab 
                   </div>
 
                   {/* Section 2: SketchUp Integration */}
-                  <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 flex items-center justify-center font-bold text-lg">
+                  <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
+                    <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+                      <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 flex items-center justify-center font-black text-xl shadow-inner">
                         SKP
                       </div>
                       <div>
-                        <h4 className="text-base font-bold text-slate-900 dark:text-white">
-                          2. วิธีใช้งานใน SketchUp (Ruby Extension: rebar_live_sync.rb)
+                        <h4 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                          <span>2. วิธีใช้งานใน SketchUp (Ruby Plugin: rebar_live_sync.rb)</span>
+                          <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 text-[10px] font-bold">
+                            Live Sync สองทิศทาง
+                          </span>
                         </h4>
                         <p className="text-xs text-slate-500">
-                          เปิดหน้าต่าง Live Sync ควบคุมในตัว และสั่งสร้างโมเดล 3D เหล็กเส้นจริงลงโมเดล
+                          เปิดหน้าต่าง Live Sync ควบคุมในตัว, สั่งสร้างโมเดล 3D เหล็กเส้นจริงลงโมเดล และคิดปริมาตรคอนกรีตจากชิ้นงาน 3D
                         </p>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                      {/* Installation */}
                       <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
                         <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
                           <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[11px] flex items-center justify-center font-bold">1</span>
-                          <span>การติดตั้งปลั๊กอิน SketchUp:</span>
+                          <span>ขั้นตอนการติดตั้งปลั๊กอินเข้า SketchUp:</span>
                         </div>
-                        <ol className="list-decimal list-inside space-y-1 text-xs text-slate-600 dark:text-slate-300 pl-1 leading-relaxed">
+                        <ol className="list-decimal list-inside space-y-1.5 text-xs text-slate-600 dark:text-slate-300 pl-1 leading-relaxed">
                           <li>กดปุ่มสีฟ้า <b>"โหลดปลั๊กอิน SketchUp (.rb)"</b> ด้านบน</li>
-                          <li>นำไฟล์ <code className="bg-slate-200 dark:bg-slate-700 px-1 py-0.5 rounded">rebar_live_sync.rb</code> ไปวางในโฟลเดอร์ Plugins ของ SketchUp:
-                            <div className="mt-1 p-2 rounded-xl bg-slate-200 dark:bg-slate-900 font-mono text-[10px] select-all break-all text-slate-700 dark:text-slate-300">
+                          <li>นำไฟล์ <code className="bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded font-mono font-bold text-blue-600">rebar_live_sync.rb</code> ไปวางในโฟลเดอร์ Plugins:
+                            <div className="mt-1 p-2 rounded-xl bg-slate-200 dark:bg-slate-950 font-mono text-[10px] select-all break-all text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-800">
                               %APPDATA%\SketchUp\SketchUp 2024\SketchUp\Plugins
                             </div>
                           </li>
-                          <li>หรือเปิดเมนู <b>Window &rarr; Ruby Console</b> แล้วพิมพ์คำสั่ง:
-                            <div className="mt-1 p-2 rounded-xl bg-slate-200 dark:bg-slate-900 font-mono text-[11px] text-blue-600 dark:text-blue-400">
+                          <li>หรือเปิดโปรแกรม SketchUp ไปที่เมนู <b>Window &rarr; Ruby Console</b> แล้วพิมพ์คำสั่ง:
+                            <div className="mt-1 p-2 rounded-xl bg-slate-200 dark:bg-slate-950 font-mono text-[11px] text-blue-600 dark:text-blue-400 border border-slate-300 dark:border-slate-800">
                               load 'rebar_live_sync.rb'
                             </div>
                           </li>
                         </ol>
                       </div>
 
-                      <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                      {/* Commands in SketchUp */}
+                      <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2.5">
                         <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
                           <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[11px] flex items-center justify-center font-bold">2</span>
-                          <span>การใช้งานเมนูใน SketchUp:</span>
+                          <span>เมนูคำสั่งและการใช้งานใน SketchUp (Extensions &rarr; ถอดเหล็กเส้น & Live Sync):</span>
                         </div>
-                        <ul className="list-disc list-inside space-y-2 text-xs text-slate-600 dark:text-slate-300 pl-1 leading-relaxed">
-                          <li>
-                            <b>เปิดหน้าต่าง Live Sync:</b> ไปที่เมนู <span className="font-bold text-slate-900 dark:text-white">Extensions &rarr; ถอดเหล็กเส้น & Live Sync &rarr; 1. เปิดหน้าต่าง Live Sync BBS</span> เพื่อจัดการ ถอดแบบ และดูตารางสรุปโดยไม่ต้องสลับโปรแกรม
+                        <ul className="space-y-2 text-xs text-slate-600 dark:text-slate-300 pl-1 leading-relaxed">
+                          <li className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80">
+                            <b className="text-blue-600 dark:text-blue-400 block mb-0.5">1. เปิดหน้าต่าง Live Sync BBS:</b>
+                            เปิดหน้าต่างจัดการถอดแบบใน SketchUp สามารถดูตารางสรุป เพิ่ม/แก้ไขรายการ และดูเศษคงเหลือได้ทันที
                           </li>
-                          <li>
-                            <b>สร้างโมเดล 3D อัตโนมัติ:</b> ไปที่เมนู <span className="font-bold text-slate-900 dark:text-white">Extensions &rarr; ถอดเหล็กเส้น & Live Sync &rarr; 2. สร้างโมเดล 3D เหล็กเส้นจริง</span> ระบบจะดึงข้อมูล BBS มาวาดเป็น 3D Cylinder ขนาดเส้นผ่าศูนย์กลางตาม มอก. และความยาวจริงลงในโมเดลทันที
+                          <li className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80">
+                            <b className="text-blue-600 dark:text-blue-400 block mb-0.5">2. สร้างโมเดล 3D เหล็กเส้น & บีมจริง (Generate 3D Steel):</b>
+                            ดึงข้อมูล BBS มาวาดเป็น 3D Solid Cylinder ขนาดเส้นผ่าศูนย์กลางตาม มอก. จริง (เช่น DB12 = 12mm, DB20 = 20mm) และความยาวจริงลงในโมเดล 3D ช่วยตรวจสอบระยะทาบและตำแหน่งเหล็ก
+                          </li>
+                          <li className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80">
+                            <b className="text-blue-600 dark:text-blue-400 block mb-0.5">3. คิดปริมาตรคอนกรีตจากชิ้นงาน 3D (Concrete Volume from Selected):</b>
+                            คลิกเลือกวัตถุ 3D Solid / Group (เช่น ฐานราก, เสา, คาน) ปลั๊กอินจะอ่านปริมาตรจริงเป็นลูกบาศก์เมตร (คิว m³) เผื่อเท 5% และส่งบันทึกเข้าสู่ระบบคลาวด์ให้อัตโนมัติ
                           </li>
                         </ul>
                       </div>
-                    </div>
-                  </div>
-
-                  {/* Section 3: Interactive H-BEAMS TIS 1227-2558 Standard Table */}
-                  <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
-                      <div>
-                        <h4 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                          <span>📐 ตารางมาตรฐานเหล็กโครงสร้างรูปพรรณรีดร้อน H-BEAMS (มอก. 1227-2558)</span>
-                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 text-[10px] font-bold">
-                            TIS STANDARD
-                          </span>
-                        </h4>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          ขนาดมาตรฐาน H, B, t1, t2, รัศมี r, น้ำหนักต่อเมตร (kg/m) และค่าคุณสมบัติหน้าตัดตามมาตรฐานสากล
-                        </p>
-                      </div>
-
-                      <div className="text-xs text-slate-400">
-                        รวมทั้งหมด <b className="text-slate-800 dark:text-slate-200">{H_BEAM_STANDARDS_TIS.length}</b> ขนาด
-                      </div>
-                    </div>
-
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs text-left">
-                        <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 uppercase tracking-wider font-bold border-b border-slate-200 dark:border-slate-800">
-                          <tr>
-                            <th className="p-2.5">Nominal Size (mm)</th>
-                            <th className="p-2.5 text-right font-black text-amber-600 dark:text-amber-400">Weight (kg/m)</th>
-                            <th className="p-2.5 text-right">H (mm)</th>
-                            <th className="p-2.5 text-right">B (mm)</th>
-                            <th className="p-2.5 text-right">t1 (mm)</th>
-                            <th className="p-2.5 text-right">t2 (mm)</th>
-                            <th className="p-2.5 text-right">r (mm)</th>
-                            <th className="p-2.5 text-right">Area (cm²)</th>
-                            <th className="p-2.5 text-right">Ix (cm⁴)</th>
-                            <th className="p-2.5 text-right">Iy (cm⁴)</th>
-                            <th className="p-2.5 text-right">Zx (cm³)</th>
-                            <th className="p-2.5 text-right">Zy (cm³)</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                          {H_BEAM_STANDARDS_TIS.map((b, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                              <td className="p-2.5 font-bold text-slate-900 dark:text-white">
-                                <span className="px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300 font-extrabold border border-amber-200 dark:border-amber-800/60">
-                                  {b.label}
-                                </span>
-                              </td>
-                              <td className="p-2.5 text-right font-black text-amber-600 dark:text-amber-400">
-                                {b.weight.toFixed(2)}
-                              </td>
-                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.H}</td>
-                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.B}</td>
-                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.t1}</td>
-                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.t2}</td>
-                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.r}</td>
-                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.area.toFixed(2)}</td>
-                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.Ix.toLocaleString()}</td>
-                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.Iy.toLocaleString()}</td>
-                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.Zx.toLocaleString()}</td>
-                              <td className="p-2.5 text-right text-slate-600 dark:text-slate-300">{b.Zy.toLocaleString()}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
                     </div>
                   </div>
 
